@@ -21,7 +21,7 @@ The **LiveKit Agent worker** (Python, `services/livekit-agent/`) is the single p
 1. Joins the LiveKit room as an agent participant.
 2. Constructs an `AgentSession` whose `llm` is `livekit.plugins.google.beta.realtime.RealtimeModel` (Gemini Live).
 3. Wraps the session in `livekit.plugins.tavus.AvatarSession(replica_id, persona_id)` — Tavus's BYO-LLM mode where the avatar plugin **subscribes to the agent's audio output** and re-publishes synced audio + 1080p video into the room.
-4. Registers three Python `@function_tool` handlers — `start_build`, `modify_build`, `web_search`. When Gemini emits a tool call, the handler runs **in the agent process**. `start_build` and `modify_build` POST to the orchestrator (`/api/avatar/tool-call`); `web_search` calls Tavily directly and returns results back into Gemini's context. (Phase 3 shipped a no-op `chat_status` placeholder; Phase 4 replaces it.)
+4. Registers three Python `@function_tool` handlers — `start_build`, `modify_build`, `web_search`. When Gemini emits a tool call, the handler runs **in the agent process**. `start_build` and `modify_build` POST to the orchestrator (`/api/avatar/tool-call`); `web_search` calls Exa's `/answer` endpoint directly and returns the synthesized answer back into Gemini's context. (Phase 3 shipped a no-op `chat_status` placeholder; Phase 4 replaces it.)
 
 The **orchestrator** never sees raw audio. It only ever sees HTTP tool-call payloads from the LiveKit Agent and Convex mutations that mirror agent state.
 

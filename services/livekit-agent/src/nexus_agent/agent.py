@@ -16,7 +16,7 @@ to the orchestrator over HTTP, which mirrors them to Convex
 Phase 4 tools:
   - start_build(intent)  → POST /api/session  (kicks Cursor + Daytona)
   - modify_build(change) → POST /api/session  (resume same Cursor agent)
-  - web_search(query)    → Tavily, agent-side. Never hits the orchestrator.
+  - web_search(query)    → Exa /answer, agent-side. Never hits the orchestrator.
 """
 
 from __future__ import annotations
@@ -37,13 +37,13 @@ from livekit.agents import (
 if TYPE_CHECKING:
     from livekit.agents import AgentStateChangedEvent
 
+from .exa_client import ExaClient
 from .narration_server import (
     register_narration_session,
     shutdown_narration_server,
     unregister_narration_session,
 )
 from .orchestrator_client import OrchestratorClient
-from .tavily_client import TavilyClient
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +107,13 @@ class NexusAgent(Agent):
         self,
         *,
         client: OrchestratorClient,
-        tavily: TavilyClient,
+        exa: ExaClient,
         session_id: str | None,
         on_session_resolved: Any = None,
     ) -> None:
         super().__init__(instructions=SYSTEM_INSTRUCTIONS)
         self._client = client
-        self._tavily = tavily
+        self._exa = exa
         # The "active build session" — same as the voice session. The first
         # start_build call lands on this row in Convex; modify_build reuses
         # it.
@@ -212,12 +212,12 @@ class NexusAgent(Agent):
             query: The search query.
         """
         logger.info("tool: web_search(query=%r)", query)
-        if not self._tavily.is_configured:
+        if not self._exa.is_configured:
             return (
-                "web search is not set up on this worker — TAVILY_API_KEY is "
+                "web search is not set up on this worker — EXA_API_KEY is "
                 "missing."
             )
-        return await self._tavily.search(query)
+        return await self._exa.search(query)
 
 
 # ---------------------------------------------------------------------------
@@ -392,10 +392,10 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     client = OrchestratorClient()
-    tavily = TavilyClient()
-    if not tavily.is_configured:
+    exa = ExaClient()
+    if not exa.is_configured:
         logger.warning(
-            "TAVILY_API_KEY is not set — web_search tool will return a "
+            "EXA_API_KEY is not set — web_search tool will return a "
             "graceful 'not configured' message instead of searching."
         )
 
@@ -438,7 +438,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
         agent = NexusAgent(
             client=client,
-            tavily=tavily,
+            exa=exa,
             session_id=session_id,
             on_session_resolved=_publish_session_id,
         )
@@ -472,7 +472,7 @@ async def entrypoint(ctx: JobContext) -> None:
             if session_id:
                 unregister_narration_session(session_id)
             await client.aclose()
-            await tavily.aclose()
+            await exa.aclose()
             await shutdown_narration_server()
 
         ctx.add_shutdown_callback(_on_shutdown)
@@ -480,5 +480,5 @@ async def entrypoint(ctx: JobContext) -> None:
         if session_id:
             unregister_narration_session(session_id)
         await client.aclose()
-        await tavily.aclose()
+        await exa.aclose()
         raise
