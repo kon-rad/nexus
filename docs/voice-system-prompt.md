@@ -141,8 +141,35 @@ You do not promise outcomes you cannot verify. If you said something would work 
 You do not refuse normal coding requests. If it is legal and reasonable, you build it.
 ```
 
+## Trigger-discipline test matrix (Phase 4.2)
+
+Hand-walked against the prompt above. **Expected behavior** is what the model should do given the prompt; **Verdict** records whether the prompt as written, in `gemini-2.5-flash-preview-native-audio-dialog`, is likely to comply. Live verification with real keys is captured in §7 of `docs/voice-tools-plan.md`.
+
+| # | Utterance | Expected | Verdict |
+|---|---|---|---|
+| 1 | "Build me a todo app with dark mode." | Call `start_build("todo app with dark mode")`. | PASS — direct build verb + concrete app + qualifier; matches §"What you can do" §start_build trigger list. |
+| 2 | "Make a snake game." | Call `start_build("snake game")`. | PASS — explicit build verb + concrete app; in trigger list. |
+| 3 | "What can you build?" | Reply with concrete examples list, then ask which one to pick. **No tool call.** | PASS — §"When to talk versus when to act" specifies "give sharp examples … then ask which one they want and call start_build". |
+| 4 | "Hmm, maybe a website?" | Ask one clarifying question, then offer 2–3 concrete options. **No tool call.** | PASS — §"When to talk" §"if the user is brainstorming or unsure, help them think." |
+| 5 | "What's the latest version of Next.js?" | Call `web_search("latest Next.js version")`, then answer with the result. | PASS — §"When to talk" §"if your answer would be a guess at the current state of the world, call web_search first." |
+| 6 | "Can you explain what hooks are in React?" | Answer from training. Don't call `web_search`. Don't call `start_build`. | PASS — §"explain a technology" + §web_search anti-trigger ("language syntax, classic algorithms"). |
+| 7 | "Make the buttons blue." (after a prior start_build in the same session) | Call `modify_build("make the buttons blue")`. | PASS — §modify_build trigger list verbatim. |
+| 8 | "Stop." (mid-narration) | Cut audio immediately. Don't finish the thought. **Cancel current build per orchestrator side.** | PASS — §"how you speak" §"If the user interrupts you, stop immediately. Do not finish your thought." Reinforced at runtime by `session.interrupt()` (Phase 3.10) + Phase 4.6 cancel routing. |
+| 9 | "Actually, build me a snake game instead." (mid-build) | Cancel the current build, then call `start_build("snake game")` for a fresh run. | PASS — §start_build trigger language ("describes a new application"); orchestrator-side cancel handled in Phase 4.6. |
+| 10 | "What's the weather?" | Politely refuse / punt. **No tool call.** | PASS — §web_search anti-trigger ("Do not search just to fill silence"); §"What you do not do" §"Never lecture. Never moralize." Refusal is brief by default. |
+| 11 | "Can you scaffold a Next.js app with Tailwind?" | Call `start_build("Next.js app with Tailwind")`. | PASS — explicit build verb + concrete stack; in trigger list. |
+| 12 | "I'm thinking about a chat app, what do you think?" | Brainstorm — ask clarifying question or suggest 2–3 directions. **No tool call.** | PASS — §start_build anti-trigger ("describing something they are considering"); §brainstorming behavior. |
+
+### Failure modes the prompt actively guards against
+
+- **Over-trigger**: utterance 3 ("what can you build?") is a soft probe, not a build request. The prompt explicitly addresses this case ("give sharp examples … not an abstract sales pitch") to prevent `start_build` misfires.
+- **Under-trigger**: utterance 1 ("build me a todo app") is the canonical demo opener. The prompt's first explicit example matches it word-for-word so the model has zero ambiguity.
+- **Search-as-filler**: utterance 6 (React hooks) is a textbook concept the model knows. The §web_search anti-trigger keeps Tavily quotas safe.
+- **Tone drift**: §Tone explicitly bans "great question" / over-apologizing / lecturing. This holds the demo voice tight.
+
 ## Changelog
 
 | Date | Change |
 | --- | --- |
 | 2026-05-09 | Initial draft. Three tools: `start_build`, `modify_build`, `web_search`. `modify_build` and `web_search` flagged as proposed extensions to `voice-architecture.md` § "Tool-call contract". |
+| 2026-05-09 (Phase 4.2) | Add narration-hints clause to §start_build (Phase 4.5 wires the side channel). Add 12-utterance trigger-discipline test matrix. Mark trigger contract locked. |
