@@ -95,7 +95,7 @@
 | 1:15 | preview update | (no input) | Avatar: *"Try it — click a task."* | Iframe auto-refreshes (key change on previewUrl); confetti fires on click. |
 | 1:30 | utt 3 — interrupt | Say: **"Stop. Actually, build me a snake game instead."** (cut in mid-narration) | Avatar audio cuts within 300 ms. Then: *"Switching gears — building the snake game now."* | Tool call: agent classifies as new build → `start_build("snake game")`. Orchestrator cancels the old Cursor Run; a fresh sandbox spins up. |
 | 2:00 | snake renders | (no input) | Avatar: *"Snake's ready — use arrow keys."* | Live Preview tab shows the snake game. |
-| 2:30 | utt 4 — research | Say: **"What's the latest Next.js version?"** | Avatar: *(brief pause)* *"Looks like 15.1 just shipped — want me to upgrade?"* | Tool call: `web_search("latest Next.js version")` → Tavily. **No** orchestrator call. |
+| 2:30 | utt 4 — research | Say: **"What's the latest Next.js version?"** | Avatar: *(brief pause)* *"Looks like 15.1 just shipped — want me to upgrade?"* | Tool call: `web_search("latest Next.js version")` → Exa `/answer`. **No** orchestrator call. |
 | 2:50 | export | Click **Export Code** in the top-right. | (no audio) | Browser downloads `nexus-<sessionId>.zip`. |
 | 3:00 | end | Say: **"Thanks, that's all."** | Avatar: *"Anytime."* | End-call button tears down the room. |
 

@@ -1,13 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@convex/_generated/api";
 import { GhostButton } from "@/components/Button";
 import { GlassPill } from "@/components/GlassPill";
 import { IconArrow, IconBolt } from "@/components/icons";
 import { Logo } from "@/components/Logo";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { SectionDivider } from "@/components/SectionDivider";
+
+// Phase 4.11: hackathon scope is unauthenticated. We use a constant
+// "demo-user" id so the Convex `byUser` query has something to filter on.
+// Phase 5 / post-hackathon swaps this for a real auth identity.
+const DEMO_USER_ID = "demo-user";
+
+type LiveSession = {
+  _id: string;
+  createdAt: number;
+  state: string;
+  sandboxId?: string;
+  previewUrl?: string;
+  endReason?: string;
+};
 
 type RowProps = {
   label: string;
@@ -63,16 +79,12 @@ const VOICES = [
 
 type VoiceId = (typeof VOICES)[number]["id"];
 
-const USAGE: ReadonlyArray<{
+type UsageRow = {
   k: string;
   v: string;
   max?: string;
   pct?: number;
-}> = [
-  { k: "Voice minutes", v: "218", max: "500", pct: 0.43 },
-  { k: "Sandboxes created", v: "37", max: "∞" },
-  { k: "Code exports", v: "12" },
-];
+};
 
 export default function ProfilePage() {
   const [voiceId, setVoiceId] = useState<VoiceId>("aiden");
@@ -80,6 +92,66 @@ export default function ProfilePage() {
   const [thinkingGlow, setThinkingGlow] = useState(true);
   const [ghToken, setGhToken] = useState("");
   const [oaiKey, setOaiKey] = useState("");
+
+  // Phase 4.11: live session history. The Convex query key is `byUser`; we
+  // pass a demo user id since the hackathon scope is unauthenticated.
+  const sessionsRaw = useQuery(api.sessions.byUser, {
+    userId: DEMO_USER_ID,
+    limit: 50,
+  });
+  const sessions: ReadonlyArray<LiveSession> = useMemo(
+    () => (sessionsRaw as LiveSession[] | undefined) ?? [],
+    [sessionsRaw],
+  );
+
+  const usage: ReadonlyArray<UsageRow> = useMemo(() => {
+    // Voice minutes: rough heuristic — assume each session burned ~3 minutes.
+    // Without real timestamp data per turn we can't compute this exactly.
+    const sessionCount = sessions.length;
+    const voiceMinutes = sessionCount * 3;
+    const sandboxesCreated = sessions.filter((s) => !!s.sandboxId).length;
+    // Exports: we don't track these in Convex (yet); keep it static or 0.
+    const exports = 0;
+    return [
+      {
+        k: "Voice minutes",
+        v: String(voiceMinutes),
+        max: "500",
+        pct: Math.min(voiceMinutes / 500, 1),
+      },
+      { k: "Sandboxes created", v: String(sandboxesCreated), max: "∞" },
+      { k: "Code exports", v: String(exports) },
+    ];
+  }, [sessions]);
+
+  // Wire local settings from the workspace's modal so the toggles in the
+  // profile page reflect what the user actually set there.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("nexus.settings.v1");
+      if (!raw) return;
+      const s = JSON.parse(raw) as {
+        avatarVoice?: string;
+        terminalFontPx?: number;
+        thinkingGlow?: boolean;
+      };
+      if (s.terminalFontPx) setTerminalLg(s.terminalFontPx > 12);
+      if (typeof s.thinkingGlow === "boolean") setThinkingGlow(s.thinkingGlow);
+      // Voice id — fall through to default if unknown.
+      const voiceMap: Record<string, VoiceId> = {
+        Puck: "aiden",
+        Aoede: "nova",
+        Kore: "kai",
+      };
+      if (s.avatarVoice && voiceMap[s.avatarVoice]) {
+        const id = voiceMap[s.avatarVoice];
+        if (id) setVoiceId(id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   return (
     <div
@@ -251,13 +323,13 @@ export default function ProfilePage() {
               gridTemplateColumns: "repeat(3, 1fr)",
             }}
           >
-            {USAGE.map((m, i) => (
+            {usage.map((m, i) => (
               <div
                 key={m.k}
                 style={{
                   padding: "20px 22px",
                   borderRight:
-                    i < USAGE.length - 1
+                    i < usage.length - 1
                       ? "1px solid var(--border-subtle)"
                       : "none",
                 }}
@@ -327,6 +399,76 @@ export default function ProfilePage() {
             ))}
           </div>
         </div>
+
+        {/* Recent sessions list — Phase 4.11 wiring of api.sessions.byUser. */}
+        {sessions.length > 0 ? (
+          <div
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 14,
+              overflow: "hidden",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 22px",
+                borderBottom: "1px solid var(--border-subtle)",
+                fontSize: 12,
+                color: "var(--text-tertiary)",
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                fontWeight: 500,
+              }}
+            >
+              Recent sessions
+            </div>
+            <div>
+              {sessions.slice(0, 8).map((s) => (
+                <div
+                  key={s._id}
+                  style={{
+                    padding: "12px 22px",
+                    borderTop: "1px solid var(--border-subtle)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    fontSize: 13,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background:
+                        s.state === "PREVIEW"
+                          ? "var(--text-success)"
+                          : s.state === "ERROR"
+                          ? "var(--text-danger)"
+                          : "var(--accent-cyan)",
+                    }}
+                  />
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {new Date(s.createdAt).toLocaleString()}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-jetbrains-mono), monospace",
+                      fontSize: 11,
+                      color: "var(--text-tertiary)",
+                      marginLeft: "auto",
+                    }}
+                  >
+                    {s.state.toLowerCase()}
+                    {s.endReason ? ` · ${s.endReason}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* Integrations */}
         <SectionDivider label="Integrations" />

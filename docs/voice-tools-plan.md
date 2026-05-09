@@ -39,7 +39,7 @@ modify_build(change)
 
 web_search(query)
   └─ LiveKit Agent (@function_tool)
-       └─ HTTPS  →  Tavily API  (no orchestrator hop)
+       └─ HTTPS  →  Exa /answer API  (no orchestrator hop)
                        └─ returns top 5 snippets → fed back into Gemini context
 ```
 
@@ -64,7 +64,7 @@ The orchestrator sees `start_build` and `modify_build`. It does **not** see `web
   - Call `agent.send({ message: change })` (per Cursor SDK docs).
   - Push a Convex event `{ type: "MODIFY", payload: { change }, ts }`.
   - Return `{ ok: true }` to the LiveKit Agent.
-- [ ] **2.3** **Do not** add a `web_search` endpoint to the orchestrator. The LiveKit Agent calls Tavily directly.
+- [ ] **2.3** **Do not** add a `web_search` endpoint to the orchestrator. The LiveKit Agent calls Exa directly.
 
 ---
 
@@ -72,7 +72,7 @@ The orchestrator sees `start_build` and `modify_build`. It does **not** see `web
 
 The `services/livekit-agent/prompts/system_prompt.txt` file already exists. Everything else here is new.
 
-- [ ] **3.1** Scaffold `services/livekit-agent/` as a Python 3.11 package per `build-plan.md` Phase 3.2. Add `pyproject.toml` with deps: `livekit-agents`, `livekit-plugins-google`, `livekit-plugins-tavus`, `httpx`, `python-dotenv`, `tavily-python`.
+- [ ] **3.1** Scaffold `services/livekit-agent/` as a Python 3.11 package per `build-plan.md` Phase 3.2. Add `pyproject.toml` with deps: `livekit-agents`, `livekit-plugins-google`, `livekit-plugins-tavus`, `httpx`, `python-dotenv`. (We call Exa's REST API via `httpx` directly — no `exa-py` SDK dependency.)
 - [ ] **3.2** Create `services/livekit-agent/agent.py` that:
   - Loads the system prompt from `prompts/system_prompt.txt`.
   - Constructs `AgentSession` with `livekit.plugins.google.beta.realtime.RealtimeModel(instructions=SYSTEM_PROMPT, voice=...)`.
@@ -88,10 +88,10 @@ The `services/livekit-agent/prompts/system_prompt.txt` file already exists. Ever
   - HTTP POST to `${ORCHESTRATOR_URL}/api/session/{sessionId}/modify` with `{ change }`.
   - Return `"changes queued"`.
 - [ ] **3.5** Implement `@function_tool web_search(self, context, query: str) -> str`:
-  - Call Tavily: `tavily_client.search(query, max_results=5, search_depth="basic")`.
+  - Call Exa: `exa_client.search(query)` → POSTs to `https://api.exa.ai/answer` with `{ query, model: "exa" }` and `x-api-key` header. Returns synthesized answer + top citation as a single string.
   - Format the top 5 results as plain text — title, URL, snippet — joined with newlines. Cap at ~1500 chars to keep Gemini's context lean.
   - Return that string (it goes back to Gemini as the tool result).
-- [ ] **3.6** Add `services/livekit-agent/.env.example` with: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GOOGLE_API_KEY`, `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `TAVUS_PERSONA_ID`, `TAVILY_API_KEY`, `ORCHESTRATOR_URL`. Document each in a comment.
+- [ ] **3.6** Add `services/livekit-agent/.env.example` with: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GOOGLE_API_KEY`, `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `TAVUS_PERSONA_ID`, `EXA_API_KEY`, `ORCHESTRATOR_URL`. Document each in a comment.
 - [ ] **3.7** Add `services/livekit-agent/README.md` with the run command (`python -m agent dev`) and the env vars. One screen, no fluff.
 
 ---
@@ -114,13 +114,13 @@ See §6 below for the exact field-by-field walkthrough. The `[ ]` items here are
 
 ---
 
-## §5 — Tavily setup (web_search backing)
+## §5 — Exa setup (web_search backing)
 
-- [ ] **5.1** Sign up at tavily.com (free tier: 1000 searches/month — plenty for the hackathon).
-- [ ] **5.2** Generate API key. Save as `TAVILY_API_KEY` in `services/livekit-agent/.env`.
-- [ ] **5.3** Verify with `curl -X POST https://api.tavily.com/search -H "Content-Type: application/json" -d '{"api_key":"...","query":"latest Next.js version"}'` returns JSON with `results[]`.
+- [ ] **5.1** Sign up at exa.ai (free tier: 1000 credits — plenty for the hackathon; ~$0.005 per request after).
+- [ ] **5.2** Generate API key in the dashboard. Save as `EXA_API_KEY` in `services/livekit-agent/.env`.
+- [ ] **5.3** Verify with `curl -X POST https://api.exa.ai/answer -H "x-api-key: $EXA_API_KEY" -H "content-type: application/json" -d '{"query":"latest Next.js version","model":"exa"}'` returns JSON with `answer` and `citations[]`.
 
-If the team prefers Brave Search, Serper, or Google Programmable Search, swap §3.5 and §5 — the contract (query in, top-5 snippets out) is identical.
+If the team prefers Tavily, Brave Search, or Google Programmable Search, swap `exa_client.py` and §5 — the public contract (`is_configured`, `aclose()`, `search(query) -> str`) is identical so `agent.py` doesn't change.
 
 ---
 
@@ -183,7 +183,7 @@ If you wanted Tavus to use Gemini *directly* (no LiveKit, no BYO), the lever wou
 - [ ] **7.2** From a browser test client, speaking "hello" gets a spoken response from the avatar within 1.5s, lips synced.
 - [ ] **7.3** Saying "build me a todo app" calls `start_build`. The orchestrator returns a `sessionId`. Convex `events` table receives a `THINKING` event within 500ms. Frontend Code Inspection tab starts streaming files.
 - [ ] **7.4** Saying "make the buttons blue" after 7.3 calls `modify_build`, not `start_build`. Same sandbox; new code streams into the same files.
-- [ ] **7.5** Asking "what is the latest version of Next.js?" calls `web_search`, then the avatar answers with a current version. Logs show one Tavily HTTP call, no orchestrator call.
+- [ ] **7.5** Asking "what is the latest version of Next.js?" calls `web_search`, then the avatar answers with a current version. Logs show one Exa HTTP call, no orchestrator call.
 - [ ] **7.6** Asking "what can you build?" gets a short list of concrete examples (todo app, chat client, snake game…), **not** a sales pitch. The model does **not** call `start_build` until the user picks one.
 - [ ] **7.7** Interrupting mid-narration: avatar audio cuts within 300ms, Gemini stops streaming, no zombie lip-sync.
 - [ ] **7.8** Three "stress turns" pass:
@@ -198,9 +198,9 @@ If you wanted Tavus to use Gemini *directly* (no LiveKit, no BYO), the lever wou
 - **Avatar narration during long codegen** (`build-plan.md` 4.5 / `questions.md` Q3). This needs a side channel from the orchestrator → LiveKit Agent → Gemini synthetic-message API. Tracked separately.
 - **Failure-mode UI** (`build-plan.md` 4.8). Tavus offline → audio-only fallback. Tracked in Phase 4.8.
 - **Production Tavus persona** with a custom replica. Phase 5 polish.
-- **Web search caching**. If the same query repeats, we re-call Tavily. Fine for hackathon.
+- **Web search caching**. If the same query repeats, we re-call Exa. Fine for hackathon.
 
 ---
 
 **Owner:** voice/media pair (per `build-plan.md` Phase 3 owners).
-**Estimated effort:** §1 (1h docs), §2 (2h orchestrator), §3 (4h Python agent), §4 (15min Tavus UI), §5 (10min Tavily), §6 reference, §7 (1h verification). **~8 hours of focused work.**
+**Estimated effort:** §1 (1h docs), §2 (2h orchestrator), §3 (4h Python agent), §4 (15min Tavus UI), §5 (10min Exa), §6 reference, §7 (1h verification). **~8 hours of focused work.**

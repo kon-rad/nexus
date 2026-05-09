@@ -108,18 +108,18 @@ Triggers: `"make the buttons blue"`, `"add a confetti animation"`, `"use Postgre
 ```python
 @function_tool()
 async def web_search(self, context: RunContext, query: str) -> str:
-    """Fetch current docs/versions/news. Returns top 5 snippets as plain text."""
-    # Calls Tavily directly from the agent process. Does NOT hit the orchestrator.
-    # Returns up to ~1500 chars; the model summarizes.
+    """Fetch current docs/versions/news. Returns a synthesized answer + top citation."""
+    # Calls Exa's /answer endpoint directly from the agent process.
+    # Does NOT hit the orchestrator. Returns up to ~1500 chars.
 ```
 
-`web_search` is intentionally agent-side. The orchestrator only owns codegen state, so search results — which never mutate sandbox state — round-trip entirely inside the LiveKit Agent. This keeps search latency bounded by Gemini's tool-call cycle and prevents stalls in the codegen state writes. (Disabled at runtime if `TAVILY_API_KEY` is unset; the model is told via the system prompt to not call it then.)
+`web_search` is intentionally agent-side. The orchestrator only owns codegen state, so search results — which never mutate sandbox state — round-trip entirely inside the LiveKit Agent. This keeps search latency bounded by Gemini's tool-call cycle and prevents stalls in the codegen state writes. (Disabled at runtime if `EXA_API_KEY` is unset; the tool returns a graceful "not configured" string instead of erroring.)
 
 ### Tool routing summary
 
 ```
 start_build / modify_build  →  LiveKit Agent  →  HTTP  →  Orchestrator  →  Cursor + Daytona + Convex
-web_search                   →  LiveKit Agent  →  HTTPS (Tavily) → returns to Gemini context
+web_search                   →  LiveKit Agent  →  HTTPS (Exa /answer) → returns to Gemini context
 ```
 
 The orchestrator never sees `web_search`. The Phase 3 `chat_status` placeholder is removed in Phase 4.

@@ -69,17 +69,34 @@ export function TavusAvatar({ videoTrack, state, connecting }: TavusAvatarProps)
           }}
         />
       ) : (
-        // Fallback: show the Nexus headshot so the panel never goes empty
-        // while Tavus connects.
+        // Fallback: show the Nexus headshot in a small framed portrait so the
+        // panel never goes empty while Tavus connects.
         <>
-          <Image
-            src="/nexus.png"
-            alt="Nexus"
-            fill
-            priority
-            sizes="(max-width: 1200px) 60vw, 700px"
-            style={{ objectFit: "cover", zIndex: 0 }}
-          />
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(220px, 40%)",
+              aspectRatio: "1 / 1",
+              borderRadius: "50%",
+              overflow: "hidden",
+              border: "1px solid var(--border-subtle)",
+              boxShadow:
+                "0 0 0 1px rgba(255,255,255,0.04), 0 30px 60px -20px rgba(0,0,0,0.7)",
+              zIndex: 1,
+            }}
+          >
+            <Image
+              src="/nexus.png"
+              alt="Nexus"
+              fill
+              priority
+              sizes="220px"
+              style={{ objectFit: "cover", objectPosition: "center 30%" }}
+            />
+          </div>
           <div className="presence-grain" />
         </>
       )}

@@ -109,6 +109,12 @@ export function useLiveKitRoom(opts: {
   // before Convex catches up).
   const [inferredSpeaking, setInferredSpeaking] = useState(false);
 
+  // Phase 4.4: track the sessionId pushed by the LiveKit agent's
+  // start_build / modify_build tool. The agent writes
+  // `{ sessionId }` onto its local participant's attributes, which surface
+  // in the room as a participant-attributes-changed event.
+  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
+
   // ---- Lifecycle: connect on mount, disconnect on unmount ----
   useEffect(() => {
     if (!enabled) return;
@@ -177,6 +183,27 @@ export function useLiveKitRoom(opts: {
           setLocalMicTrack(null);
         });
 
+        // Phase 4.4: the LiveKit agent writes the resolved sessionId onto its
+        // local-participant attributes when start_build / modify_build returns.
+        // From the browser's perspective that participant is *remote*, and its
+        // attribute updates surface as ParticipantAttributesChanged events on
+        // the room. We also walk existing participants on connect for the
+        // case where the agent set the attribute before we subscribed.
+        const readAgentAttrs = (p: Participant) => {
+          if (isAvatarParticipant(p)) return; // Tavus participant — never carries sessionId
+          const sid = p.attributes?.["sessionId"];
+          if (typeof sid === "string" && sid) {
+            setAgentSessionId((prev) => (prev === sid ? prev : sid));
+          }
+        };
+
+        room.on(RoomEvent.ParticipantAttributesChanged, (_changed, p) => {
+          readAgentAttrs(p);
+        });
+        room.on(RoomEvent.ParticipantConnected, (p) => {
+          readAgentAttrs(p);
+        });
+
         await room.connect(tok.url, tok.token);
 
         // Publish the user's mic so the agent can hear them.
@@ -186,6 +213,12 @@ export function useLiveKitRoom(opts: {
           setLocalMicTrack(micPub.track.mediaStreamTrack);
         }
         setMicEnabled(true);
+
+        // Walk the participants the agent may have already populated before
+        // our event listener was attached.
+        for (const p of room.remoteParticipants.values()) {
+          readAgentAttrs(p);
+        }
       } catch (e) {
         if (cancelled) return;
         setError(e as Error);
@@ -235,6 +268,12 @@ export function useLiveKitRoom(opts: {
       ? "speaking"
       : "listening");
 
+  // The agent-published sessionId wins once it lands. Until then we use the
+  // token-mint sessionId (from /api/livekit/token's ensureVoiceSession). This
+  // way the right-panel queries always have *some* session to subscribe to,
+  // and they swap to the build session the moment start_build returns.
+  const sessionId = agentSessionId ?? token?.sessionId ?? null;
+
   return {
     connectionState,
     avatarVideoTrack,
@@ -245,7 +284,7 @@ export function useLiveKitRoom(opts: {
     endCall,
     token,
     error,
-    sessionId: token?.sessionId ?? null,
+    sessionId,
   };
 }
 

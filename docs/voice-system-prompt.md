@@ -44,14 +44,14 @@ The prompt assumes three `@function_tool` handlers are registered on the LiveKit
 | --- | --- | --- |
 | `start_build(intent: str)` | Specified in `voice-architecture.md` (Phase 4.1) | New build — POST `/api/session` on the orchestrator, returns `sessionId` |
 | `modify_build(change: str)` | **Proposed (extends Phase 4.7)** | Multi-turn refinement on the active sandbox — orchestrator routes to `cursor.send` on the existing agent handle |
-| `web_search(query: str)` | **Proposed (new)** | Fetch current docs, versions, news; backed by a search API (Tavily, Brave, or Google Programmable Search) called from the agent process |
+| `web_search(query: str)` | **Implemented** | Fetch current docs, versions, news; backed by Exa's `/answer` endpoint (semantic search + LLM-synthesized answer) called from the agent process |
 
 ### Open work for the proposed tools
 
 `voice-architecture.md` only documents `start_build`. Adding the other two is small but non-zero:
 
 - **`modify_build`** — Orchestrator gains `POST /api/session/:id/modify` that calls `cursor.send` on the persisted agent handle (this is `build-plan.md` Phase 4.7 work, currently bundled into general multi-turn). LiveKit Agent registers a `@function_tool` that POSTs to it.
-- **`web_search`** — LiveKit Agent registers a `@function_tool` that calls a search API directly. Recommend **Tavily** for the hackathon — single API call, returns clean JSON with snippets that fit Gemini's context cleanly. Add `TAVILY_API_KEY` (or chosen alternative) to `services/livekit-agent/.env`.
+- **`web_search`** — LiveKit Agent registers a `@function_tool` that calls **Exa's `/answer` endpoint** directly. `/answer` runs Exa's own LLM and returns a one-paragraph synthesized answer plus citations — closer to "ask, get a sentence" than Tavily's snippet-list, which is the right shape for a voice agent. Add `EXA_API_KEY` to `services/livekit-agent/.env`. Implementation lives in `services/livekit-agent/src/nexus_agent/exa_client.py`.
 
 When implementing either of these, also update `voice-architecture.md` § "Tool-call contract (Phase 3 → Phase 4)" so the two docs stay aligned.
 
@@ -164,7 +164,7 @@ Hand-walked against the prompt above. **Expected behavior** is what the model sh
 
 - **Over-trigger**: utterance 3 ("what can you build?") is a soft probe, not a build request. The prompt explicitly addresses this case ("give sharp examples … not an abstract sales pitch") to prevent `start_build` misfires.
 - **Under-trigger**: utterance 1 ("build me a todo app") is the canonical demo opener. The prompt's first explicit example matches it word-for-word so the model has zero ambiguity.
-- **Search-as-filler**: utterance 6 (React hooks) is a textbook concept the model knows. The §web_search anti-trigger keeps Tavily quotas safe.
+- **Search-as-filler**: utterance 6 (React hooks) is a textbook concept the model knows. The §web_search anti-trigger keeps Exa quotas safe.
 - **Tone drift**: §Tone explicitly bans "great question" / over-apologizing / lecturing. This holds the demo voice tight.
 
 ## Changelog

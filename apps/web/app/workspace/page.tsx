@@ -28,6 +28,8 @@ import { CodeInspection } from "./CodeInspection";
 import { DevPromptBar } from "./DevPromptBar";
 import { Insights } from "./Insights";
 import { LivePreview } from "./LivePreview";
+import { SettingsModal, applySettings, loadSettings } from "./SettingsModal";
+import { FailureBanner } from "./FailureBanner";
 
 type TabKey = "preview" | "code" | "insights";
 
@@ -71,10 +73,89 @@ export default function WorkspacePage() {
   const aiState: AvatarState = room.avatarState;
 
   useEffect(() => {
-    if (room.sessionId && !sessionId) {
+    if (room.sessionId && room.sessionId !== sessionId) {
+      // Phase 4.4: when the LiveKit agent publishes a new sessionId on
+      // local-participant attributes (start_build / modify_build), swap the
+      // right-panel queries to the new row so the user sees the live build.
       setSessionId(room.sessionId);
     }
   }, [room.sessionId, sessionId]);
+
+  // Phase 4.4: also pivot when start_build creates a new sessionId. We watch
+  // the active tab — if the user is staring at Live Preview when codegen
+  // kicks off, switch them to Code so they see files appear.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (liveSession?.state === "THINKING" || liveSession?.state === "CODING") {
+      setActiveTab("code");
+    } else if (liveSession?.state === "PREVIEW") {
+      setActiveTab("preview");
+    }
+  }, [sessionId, liveSession?.state]);
+
+  // Phase 4.10: settings (avatar voice, terminal font, glow) live in
+  // localStorage and are applied to a CSS attribute on <html> so any panel
+  // can read them without prop-drilling.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => {
+    applySettings(loadSettings());
+  }, []);
+
+  // Phase 4.9: Export Code action — fire a download from the orchestrator's
+  // /api/session/:id/export endpoint. Disabled until a session has files.
+  const orchestratorUrl =
+    process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ?? "http://localhost:4000";
+  const onExport = useCallback(() => {
+    if (!sessionId) return;
+    const a = document.createElement("a");
+    a.href = `${orchestratorUrl}/api/session/${sessionId}/export`;
+    a.download = `nexus-${sessionId}.zip`;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [sessionId, orchestratorUrl]);
+
+  // Phase 4.8: derive a failure-mode banner state.
+  type BannerKind =
+    | "convex-stale"
+    | "voice-unavailable"
+    | "audio-only"
+    | "build-error"
+    | "build-cancelled"
+    | null;
+  const banner: { kind: BannerKind; text: string } | null = (() => {
+    if (room.error) {
+      return {
+        kind: "voice-unavailable",
+        text: "Voice unavailable — start the orchestrator + livekit-agent.",
+      };
+    }
+    if (room.connectionState === "connected" && !room.avatarVideoTrack && sessionId) {
+      // Connected to LiveKit but no Tavus video — audio-only fallback.
+      return {
+        kind: "audio-only",
+        text: "Tavus avatar offline — running in audio-only mode.",
+      };
+    }
+    if (liveSession?.state === "ERROR") {
+      return {
+        kind: "build-error",
+        text:
+          (liveSession?.statusMessage as string | undefined) ??
+          "Build failed — try rephrasing your request.",
+      };
+    }
+    if (liveSession?.endReason === "user_cancel") {
+      return { kind: "build-cancelled", text: "Build cancelled." };
+    }
+    if (liveSession === null) {
+      // useQuery returned null while we have a sessionId → Convex thinks the
+      // row doesn't exist yet. Show a "syncing" banner briefly.
+      return { kind: "convex-stale", text: "Syncing build session…" };
+    }
+    return null;
+  })();
 
   // Resize handle.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -323,10 +404,18 @@ export default function WorkspacePage() {
               type="button"
               className="btn-icon"
               title="Export Code (.zip)"
+              onClick={onExport}
+              disabled={!sessionId}
+              style={{ opacity: sessionId ? 1 : 0.4 }}
             >
               <IconDownload size={14} />
             </button>
-            <button type="button" className="btn-icon" title="Settings">
+            <button
+              type="button"
+              className="btn-icon"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
               <IconCog size={14} />
             </button>
             <Link
@@ -354,6 +443,9 @@ export default function WorkspacePage() {
           <DevPromptBar sessionId={sessionId} onSession={setSessionId} />
         ) : null}
 
+        {/* Phase 4.8 failure / state banner. */}
+        {banner ? <FailureBanner kind={banner.kind} text={banner.text} /> : null}
+
         {/* Tab content */}
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           {activeTab === "preview" ? <LivePreview sessionId={sessionId} /> : null}
@@ -361,6 +453,8 @@ export default function WorkspacePage() {
           {activeTab === "insights" ? <Insights sessionId={sessionId} /> : null}
         </div>
       </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

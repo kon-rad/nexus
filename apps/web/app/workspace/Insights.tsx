@@ -161,11 +161,17 @@ function TerminalPane({
 
       if (disposed || !containerRef.current) return;
 
+      // Phase 4.10: read user-selected font size from <html data-terminal-font-px>.
+      const fontPx = (() => {
+        if (typeof document === "undefined") return 12;
+        const v = Number(document.documentElement.dataset.terminalFontPx);
+        return Number.isFinite(v) && v > 0 ? v : 12;
+      })();
       term = new Terminal({
         convertEol: true,
         cursorBlink: false,
         fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
-        fontSize: 12,
+        fontSize: fontPx,
         theme: {
           background: "#000000",
           foreground: "#E5E5E5",
