@@ -1,0 +1,15 @@
+{
+  "name": "@nexus/orchestrator",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Nexus orchestrator — Cursor SDK + Daytona + Convex pusher (Phase 2 stub)",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^20.16.10"
+  }
+}

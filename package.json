@@ -1,0 +1,16 @@
+{
+  "name": "nexus",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Nexus — AI pair programmer (monorepo)",
+  "packageManager": "pnpm@10.30.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
