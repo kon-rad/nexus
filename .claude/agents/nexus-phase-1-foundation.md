@@ -59,5 +59,6 @@ Phase 1 is done when:
 - `pnpm install && pnpm --filter web dev` boots cleanly with no console errors.
 - `pnpm --filter web typecheck` and `pnpm --filter web build` both pass.
 - A side-by-side visual comparison with `docs/design/nexus/Nexus.html` looks like the same product.
+- **`git push origin main`** runs cleanly as the final step.
 
 If you cannot complete a task, mark it `[~]` (in-progress) in `docs/build-plan.md`, document the blocker in your final report, and stop. **Do not invent scope.** Do not start Phase 2 work.

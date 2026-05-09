@@ -71,5 +71,6 @@ Phase 5 is done when:
 - Video fallback plays on the assigned keystroke, tested on a second laptop.
 - `README.md` exists at the repo root.
 - Q7, Q9, Q10 fully resolved in the Open Decisions table.
+- **`git push origin main`** runs cleanly as the final step (after all docs, runbooks, and deploy state files are committed).
 
 If a task blocks (DNS propagation, Let's Encrypt rate limit, DigitalOcean billing), mark it `[~]`, document the blocker, and report. **Do not declare the demo ready** if any verification box is unchecked — it's better to know one hour before stage than one minute after.

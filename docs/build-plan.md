@@ -57,6 +57,8 @@ These apply to every phase. Don't re-decide them per phase.
 - **Secrets:** never in `apps/web/`. All API keys live in the orchestrator's env (`/etc/nexus.env` in prod; `.env.local` in dev). The browser may only see `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_LIVEKIT_URL`.
 - **Realtime contract:** the frontend never RPCs the orchestrator for agent state. All agent state flows orchestrator → Convex → frontend `useQuery`.
 - **Commits per phase:** small, atomic, conventional commits. Each task in this plan is roughly one commit.
+- **Push at the end of every phase:** when a phase's verification boxes are all `[x]`, run `git push origin main` as the final step. Do not push mid-phase with broken intermediate states. Remote is `kon-rad/nexus`.
+- **Voice topology (Phases 3+):** Tavus runs in **Bring-Your-Own-LLM mode with Gemini Live as the LLM and voice source.** The avatar's mouth speaks Gemini Live's natively-generated audio — no separate TTS layer, no Tavus default LLM. Verify in `docs/voice-architecture.md`.
 
 ---
 

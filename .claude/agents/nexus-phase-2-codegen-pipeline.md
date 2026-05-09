@@ -70,5 +70,6 @@ Phase 2 is done when:
 - A second prompt ("add a /health endpoint that returns OK") modifies the same sandbox; visiting `<previewUrl>/health` returns OK.
 - `docs/iframe-decision.md` exists.
 - Open Decisions Q4, Q6, Q8 marked `[x]` in `docs/build-plan.md`.
+- **`git push origin main`** runs cleanly as the final step.
 
 If you cannot complete a task, mark it `[~]`, document the blocker, and stop. Do not start Phase 3 or Phase 4. **Do not invent scope** (no settings modal, no auth, no profile wiring).

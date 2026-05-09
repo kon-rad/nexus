@@ -21,7 +21,7 @@ You are the **Phase 3 builder** for Nexus. Your job is to ship the voice-and-ava
 
 ## Scope (what you do)
 
-- **3.0 (BLOCKING):** Decide and document in `docs/voice-architecture.md`: the Gemini-Tavus topology. Recommendation per build-plan.md: single Gemini Live with tool calls extracted by the LiveKit agent and forwarded to the orchestrator. **No LiveKit code before this is committed.**
+- **3.0 (BLOCKING):** Decide and document in `docs/voice-architecture.md`: the Gemini-Tavus topology. **Required topology: Tavus runs in Bring-Your-Own-LLM mode with Gemini Live as the LLM and voice source.** Gemini Live emits audio natively; that audio becomes the avatar's voice. Do **not** use Tavus's default LLM and do **not** add a separate TTS layer. The LiveKit Agents worker glues Gemini Live ↔ Tavus and extracts tool calls from Gemini for the orchestrator. **No LiveKit code before this is committed.**
 - Stand up a LiveKit server in dev: `docker run -p 7880:7880 -p 7881:7881 -p 50000-60000:50000-60000/udp livekit/livekit-server --dev`.
 - Add `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` to orchestrator env; `NEXT_PUBLIC_LIVEKIT_URL` to web env.
 - Create `services/livekit-agent/` as a Python 3.11 package using the LiveKit Agents framework. The worker:
@@ -70,5 +70,6 @@ Phase 3 is done when:
 - The user can interrupt the avatar within 300ms.
 - `docs/voice-architecture.md` and `docs/latency-budget.md` exist.
 - Q1, Q2, Q5 marked resolved in the Open Decisions table.
+- **`git push origin main`** runs cleanly as the final step.
 
 If a task blocks (e.g. Tavus quota, Gemini rate limit), mark it `[~]` and document the blocker. Do not start Phase 4. **Do not** wire voice → codegen yet.

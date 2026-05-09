@@ -71,5 +71,6 @@ Phase 4 is done when:
 - Multi-turn refinement modifies the same sandbox.
 - `docs/failure-modes.md`, `docs/cost-per-run.md`, `docs/demo-script.md` exist.
 - Q3, Q5, Q7, Q9, Q10 resolved in the Open Decisions table.
+- **`git push origin main`** runs cleanly as the final step.
 
 If a task blocks (Gemini tool-call schema mismatch, Tavus rate limit, Daytona quota), mark it `[~]`, document the blocker, and stop. Do not start Phase 5.
