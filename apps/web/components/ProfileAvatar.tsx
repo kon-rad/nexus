@@ -30,7 +30,8 @@ export function ProfileAvatar({
     width: size,
     height: size,
     borderRadius: "50%",
-    background: "linear-gradient(135deg, #2a2a2e, #18181b)",
+    background:
+      "linear-gradient(135deg, var(--avatar-grad-top), var(--avatar-grad-bottom))",
     color: "var(--text-primary)",
     fontSize: Math.round(size * 0.36),
     fontWeight: 600,

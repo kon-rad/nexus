@@ -64,7 +64,7 @@ export function AvatarControls({
           height: 36,
           borderRadius: 999,
           background: "rgba(255, 68, 68, 0.12)",
-          color: "#FF6666",
+          color: "var(--danger-soft)",
           border: "1px solid rgba(255, 68, 68, 0.3)",
         }}
       >

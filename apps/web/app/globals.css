@@ -39,6 +39,12 @@
     /* Glass */
     --glass-bg: rgba(18, 18, 18, 0.7);
     --glass-blur: blur(12px) saturate(140%);
+
+    /* Derived swatches used in component fills (kept here so components don't carry raw hex) */
+    --danger-soft: #ff6666; /* muted red for danger button text/icons */
+    --avatar-grad-top: #2a2a2e;
+    --avatar-grad-bottom: #18181b;
+    --cta-fill: #0d0d0e; /* final-CTA card base layer beneath the gradients */
   }
 
   * {

@@ -20,8 +20,12 @@ export const metadata: Metadata = {
     "Talk to Nexus. Watch it write, run, and ship full-stack apps in real time.",
 };
 
+// Theme color matches --bg-canvas. Kept inline because Next's metadata API
+// must be statically analyzable and cannot read CSS variables at build time.
+const THEME_BG_CANVAS = "#0A0A0A" as const;
+
 export const viewport: Viewport = {
-  themeColor: "#0A0A0A",
+  themeColor: THEME_BG_CANVAS,
   width: "device-width",
   initialScale: 1,
 };

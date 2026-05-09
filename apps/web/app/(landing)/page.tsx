@@ -426,7 +426,7 @@ export default function LandingPage() {
             background: `
               radial-gradient(60% 80% at 50% 110%, rgba(0,229,255,0.18), transparent 60%),
               radial-gradient(60% 80% at 50% -10%, rgba(176,38,255,0.18), transparent 60%),
-              #0d0d0e
+              var(--cta-fill)
             `,
             textAlign: "center",
             position: "relative",

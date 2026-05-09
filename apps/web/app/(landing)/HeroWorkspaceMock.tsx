@@ -82,7 +82,7 @@ export function HeroWorkspaceMock() {
                 height: 22,
                 borderRadius: 999,
                 background: "rgba(255, 68, 68, 0.15)",
-                color: "#FF6666",
+                color: "var(--danger-soft)",
                 border: "1px solid rgba(255, 68, 68, 0.3)",
                 display: "flex",
                 alignItems: "center",
