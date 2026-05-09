@@ -56,12 +56,18 @@ def main() -> None:
     _bootstrap_env()
     _bootstrap_logging()
 
-    # Phase 3 dev: leave agent_name unset by default so the worker auto-joins
-    # every room. This avoids the livekit-server v1.11.x JWT JSON-parse
-    # incompatibility with `RoomAgentDispatch.deployment` from
-    # livekit-server-sdk 2.15.x. Set LIVEKIT_AGENT_NAME explicitly to opt
-    # into per-session explicit dispatch (Phase 4 territory).
-    agent_name = os.environ.get("LIVEKIT_AGENT_NAME", "")
+    # Default to explicit-dispatch mode with the same name the orchestrator
+    # uses (apps/orchestrator/src/livekit.ts → "nexus-voice-agent"). This
+    # ensures the worker only joins rooms the orchestrator's
+    # AgentDispatchClient.createDispatch points it at — preventing the
+    # double-dispatch bug where an empty agent_name caused the worker to
+    # auto-join every room AND get an explicit dispatch on top, which spent
+    # twice the Gemini Live quota.
+    #
+    # If a deployment needs to fall back to the Phase 3 auto-join behavior
+    # (older livekit-server that rejects RoomAgentDispatch.deployment),
+    # set LIVEKIT_AGENT_NAME="" explicitly in the env.
+    agent_name = os.environ.get("LIVEKIT_AGENT_NAME", "nexus-voice-agent")
 
     cli.run_app(
         WorkerOptions(

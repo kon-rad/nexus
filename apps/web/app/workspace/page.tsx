@@ -20,7 +20,7 @@ import {
   IconPlay,
   IconSparkle,
 } from "@/components/icons";
-import { ProfileAvatar } from "@/components/ProfileAvatar";
+import { SignInPill } from "@/components/SignInPill";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TabBar, type TabItem } from "@/components/TabBar";
 import { TavusAvatar } from "@/components/TavusAvatar";
@@ -289,6 +289,31 @@ export default function WorkspacePage() {
             voice unavailable — start the orchestrator + livekit-agent
           </div>
         ) : null}
+        {room.audioBlocked && !room.error ? (
+          <button
+            type="button"
+            onClick={() => void room.resumeAudio()}
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: 100,
+              transform: "translateX(-50%)",
+              zIndex: 3,
+              padding: "9px 16px",
+              borderRadius: 999,
+              background: "rgba(0, 232, 255, 0.16)",
+              border: "1px solid rgba(0, 232, 255, 0.45)",
+              color: "var(--text-primary)",
+              fontFamily: "var(--font-jetbrains-mono), monospace",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+          >
+            tap to enable audio
+          </button>
+        ) : null}
 
         <div
           style={{
@@ -421,23 +446,13 @@ export default function WorkspacePage() {
             >
               <IconCog size={14} />
             </button>
-            <Link
-              href="/profile"
-              style={{
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-              }}
-              aria-label="Open profile"
-            >
-              <ProfileAvatar
-                initials="AK"
-                size={32}
-                ring
-                title="Open profile"
-                asChild
-              />
-            </Link>
+            {/*
+              Auth-aware nav slot. Renders a "Sign in with Google" pill when
+              the user is signed out, or the user's avatar + a sign-out menu
+              when signed in. Wraps `<Authenticated>` / `<Unauthenticated>`
+              from convex/react so the right state shows from first paint.
+            */}
+            <SignInPill />
           </div>
         </div>
 

@@ -8,12 +8,15 @@
  * @module
  */
 
+import type * as auth from "../auth.js";
 import type * as events from "../events.js";
 import type * as falJobs from "../falJobs.js";
 import type * as files from "../files.js";
+import type * as http from "../http.js";
 import type * as logs from "../logs.js";
 import type * as sandbox from "../sandbox.js";
 import type * as sessions from "../sessions.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -22,12 +25,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
   events: typeof events;
   falJobs: typeof falJobs;
   files: typeof files;
+  http: typeof http;
   logs: typeof logs;
   sandbox: typeof sandbox;
   sessions: typeof sessions;
+  users: typeof users;
 }>;
 
 /**

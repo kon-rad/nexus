@@ -377,6 +377,36 @@ def attach_state_forwarder(
 # ---------------------------------------------------------------------------
 
 
+async def _wait_for_room_connected(ctx: JobContext, *, timeout_s: float) -> None:
+    """Block until the room reports a CONN_CONNECTED state, or timeout.
+
+    Used before `session.generate_reply()` for the initial greeting so the
+    audio doesn't fire into a half-negotiated WebRTC peer connection
+    (the user joins to silence). Best-effort — we don't fail the worker
+    if the room never reports connected; we just let the greeting fire.
+    """
+    import asyncio
+
+    room = getattr(ctx, "room", None)
+    if room is None:
+        return
+    try:
+        from livekit.rtc import ConnectionState  # type: ignore[import-not-found]
+    except Exception:  # pragma: no cover — older / split SDK layouts
+        await asyncio.sleep(min(timeout_s, 0.5))
+        return
+
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if getattr(room, "connection_state", None) == ConnectionState.CONN_CONNECTED:
+            return
+        await asyncio.sleep(0.1)
+    logger.info(
+        "room.connection_state did not reach CONNECTED within %.1fs — greeting anyway",
+        timeout_s,
+    )
+
+
 async def entrypoint(ctx: JobContext) -> None:
     """JobContext entrypoint registered by the worker.
 
@@ -491,6 +521,11 @@ async def entrypoint(ctx: JobContext) -> None:
         if session_id:
             register_narration_session(session_id, session)
             await _publish_session_id(session_id)
+
+        # Wait for the room to fully negotiate before greeting. Without
+        # this, generate_reply can fire before WebRTC is established and
+        # the greeting plays into a void — the user joins to silence.
+        await _wait_for_room_connected(ctx, timeout_s=5.0)
 
         # Eagerly mark "listening" so the UI doesn't dwell on "idle" while the
         # realtime LLM is bootstrapping.

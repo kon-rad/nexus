@@ -38,11 +38,19 @@ const SYSTEM_PROMPT = `You are Nexus, an AI pair-programmer. The user has descri
 
 Build the app in the current working directory. Use a single-file or small-tree layout that runs with \`npm install && npm start\`.
 
-Strict requirements:
-- The app MUST listen on port 3000 (read PORT from env, defaulting to 3000).
-- The app's package.json MUST define a \`start\` script that runs the app in the foreground.
-- Prefer plain Node.js with Express for backend tasks; for full-stack apps, prefer Vite + React with the dev server proxying to a separate Express backend on a single port.
-- Keep the dependency tree minimal so npm install completes in < 30 seconds.
+Runtime contract (the orchestrator runs your app inside a Daytona sandbox and exposes port 3000 through a public proxy iframe). Violating any of these means the user will see a broken preview:
+- The app MUST listen on port 3000 (read PORT from env, default to 3000).
+- The app MUST bind to 0.0.0.0, NOT localhost / 127.0.0.1. The Daytona proxy cannot reach localhost-only servers.
+  - Express: \`app.listen(Number(process.env.PORT) || 3000, "0.0.0.0")\`
+  - Fastify: \`fastify.listen({ port: ..., host: "0.0.0.0" })\`
+  - Vite (dev): the start script must be \`vite --host 0.0.0.0 --port 3000\`
+  - Next.js (dev): the start script must be \`next dev -H 0.0.0.0 -p 3000\`
+- The app's package.json MUST define a \`start\` script that runs the app in the foreground (not via nodemon, not in watch mode that forks).
+- Use a flat single-package layout: package.json at the project root, no monorepos, no workspaces, no Docker / docker-compose / Caddy / Nginx config.
+- Single port only. Do NOT run a separate backend on a different port — bake API routes into the same process (Express routes, Vite middleware, or Next API routes).
+- Keep the dependency tree minimal so npm install completes in < 30 seconds. Do NOT use puppeteer, playwright, sharp, canvas, prisma, electron, or other heavy native deps.
+- For static-only demos, use \`"start": "npx -y serve@latest -l 3000 ."\` so the same npm install / npm start contract still works.
+- Do NOT write a .env file or read secrets from one — fall back to mock data or constants.
 - After writing files, do NOT run npm install or npm start yourself — the orchestrator handles those steps.
 
 Be concise in narration. The user is watching the code panel update in real time.`;
@@ -252,11 +260,15 @@ async function mirrorWrittenFile(opts: {
   }
   opts.tracker.add(rel);
   await upsertFile(opts.sessionId, rel, content);
+  // Upload using an absolute path so we don't depend on the SDK's
+  // relative-path → workDir resolution. This is the same path npm install
+  // and npm start cd into below.
+  const remote = `${opts.sandbox.workDir.replace(/\/$/, "")}/${rel}`;
   try {
-    await opts.sandbox.sdk.fs.uploadFile(Buffer.from(content, "utf8"), rel);
+    await opts.sandbox.sdk.fs.uploadFile(Buffer.from(content, "utf8"), remote);
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn(`[cursor] failed to upload ${rel} to sandbox:`, err);
+    console.warn(`[cursor] failed to upload ${remote} to sandbox:`, err);
   }
 }
 
@@ -288,8 +300,9 @@ async function syncMissedFiles(opts: {
     if (content.length > 200_000) continue; // skip huge files
     opts.tracker.add(rel);
     await upsertFile(opts.sessionId, rel, content);
+    const remote = `${opts.sandbox.workDir.replace(/\/$/, "")}/${rel}`;
     try {
-      await opts.sandbox.sdk.fs.uploadFile(Buffer.from(content, "utf8"), rel);
+      await opts.sandbox.sdk.fs.uploadFile(Buffer.from(content, "utf8"), remote);
     } catch {
       /* swallow */
     }
@@ -349,6 +362,7 @@ async function installAndStart(opts: {
 }): Promise<void> {
   const { sandbox, sessionId } = opts;
   const sessionShellId = `nexus-${sessionId}`;
+  const workDir = sandbox.workDir.replace(/\/$/, "");
   // Reuse the sandbox session if it exists; create otherwise.
   try {
     await sandbox.sdk.process.createSession(sessionShellId);
@@ -356,38 +370,82 @@ async function installAndStart(opts: {
     /* session already exists from a previous turn — that's fine */
   }
 
-  // 1) npm install (always run — cheap on warm cache, idempotent).
-  const install = await sandbox.sdk.process.executeSessionCommand(
+  // 1) npm install — gate on `node_modules/.package-lock.json` so multi-turn
+  //    refinements skip a 5-30s reinstall when nothing's changed. The
+  //    .package-lock.json marker is npm's own "deps installed" sentinel; a
+  //    bare `node_modules/` dir without it usually means a half-aborted
+  //    install we should retry.
+  const installNeededProbe = await sandbox.sdk.process.executeSessionCommand(
     sessionShellId,
     {
-      command: "cd /home/daytona && npm install --no-fund --no-audit",
+      command: `cd ${workDir} && ([ -f package.json ] && [ ! -f node_modules/.package-lock.json ] && echo NEED_INSTALL || echo SKIP_INSTALL)`,
       runAsync: false,
     },
   );
-  if (install.cmdId) {
-    await streamCommandLogs({
-      sandbox,
-      sessionId,
+  const needsInstall = (installNeededProbe.output ?? "").includes("NEED_INSTALL");
+  if (needsInstall) {
+    const install = await sandbox.sdk.process.executeSessionCommand(
       sessionShellId,
-      cmdId: install.cmdId,
-    });
+      {
+        command: `cd ${workDir} && npm install --no-fund --no-audit`,
+        runAsync: false,
+      },
+    );
+    if (install.cmdId) {
+      await streamCommandLogs({
+        sandbox,
+        sessionId,
+        sessionShellId,
+        cmdId: install.cmdId,
+      });
+    }
   }
 
-  // 2) npm start in the background. Capture pid via a dedicated wrapper so we
-  //    can kill it on follow-up turns if needed.
+  // 2) npm start in the background. Kill any prior dev server first; we use
+  //    `pkill -fE` (extended regex) so the alternation actually matches
+  //    node|next|vite. The `|| true` keeps the chain alive when nothing was
+  //    running. nohup + & detaches so the session command returns immediately.
   const start = await sandbox.sdk.process.executeSessionCommand(
     sessionShellId,
     {
       command:
-        "cd /home/daytona && (pkill -f 'node|next|vite' || true) && PORT=3000 nohup npm start > /tmp/nexus-app.log 2>&1 &",
+        `cd ${workDir} && (pkill -fE 'node|next|vite' || true) && ` +
+        `PORT=3000 HOST=0.0.0.0 nohup npm start > /tmp/nexus-app.log 2>&1 &`,
       runAsync: true,
     },
   );
 
-  // Give the dev server a moment to bind to port 3000.
-  await new Promise((r) => setTimeout(r, 2500));
+  // 3) Wait for the dev server to actually accept TCP on 3000 inside the
+  //    sandbox. Polling for ~20s with 500ms backoff covers cold Vite +
+  //    Tailwind compile. Without this the preview URL frequently renders
+  //    "Bad Gateway" before the app has bound.
+  const ready = await waitForPort({
+    sandbox,
+    sessionShellId,
+    port: 3000,
+    timeoutMs: 20_000,
+    intervalMs: 500,
+  });
+  if (!ready) {
+    // Tail the last few lines of the app log so the user sees *why* —
+    // missing dependency, bad start script, port already in use, etc.
+    const tail = await sandbox.sdk.process.executeSessionCommand(
+      sessionShellId,
+      { command: "tail -n 40 /tmp/nexus-app.log || true", runAsync: false },
+    );
+    const snippet = (tail.output ?? "").trim().slice(-600);
+    await updateSessionState(sessionId, "ERROR", {
+      statusMessage: `App did not bind to port 3000 within 20s.${
+        snippet ? ` Last log: ${snippet}` : ""
+      }`,
+    });
+    if (start.cmdId) {
+      void tailAppLog({ sandbox, sessionId, sessionShellId, cmdId: start.cmdId });
+    }
+    return;
+  }
 
-  // 3) Resolve preview URL and update Convex.
+  // 4) Resolve preview URL and update Convex.
   try {
     const preview = await sandbox.getPreviewUrl(3000);
     await updateSandbox(sessionId, {
@@ -406,11 +464,46 @@ async function installAndStart(opts: {
     });
   }
 
-  // 4) Tail the app log to logs so the user sees runtime output.
+  // 5) Tail the app log to logs so the user sees runtime output.
   if (start.cmdId) {
     // Don't await — let it run in the background. Errors are swallowed.
     void tailAppLog({ sandbox, sessionId, sessionShellId, cmdId: start.cmdId });
   }
+}
+
+/**
+ * Poll the sandbox shell until something is listening on `port`, or the
+ * timeout elapses. Uses a tiny Node one-liner over `node -e` instead of
+ * relying on `nc`/`curl`/`ss` being installed in the image — Daytona's
+ * typescript sandbox always has node.
+ */
+async function waitForPort(opts: {
+  sandbox: NexusSandbox;
+  sessionShellId: string;
+  port: number;
+  timeoutMs: number;
+  intervalMs: number;
+}): Promise<boolean> {
+  const { sandbox, sessionShellId, port, timeoutMs, intervalMs } = opts;
+  const probe =
+    `node -e "const s=require('net').createConnection({host:'127.0.0.1',port:${port}},` +
+    `()=>{s.end();process.exit(0)}); s.on('error',()=>process.exit(1));` +
+    `setTimeout(()=>{try{s.destroy()}catch{};process.exit(1)},800)"` +
+    ` && echo NEXUS_PORT_READY || true`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const r = await sandbox.sdk.process.executeSessionCommand(
+        sessionShellId,
+        { command: probe, runAsync: false },
+      );
+      if ((r.output ?? "").includes("NEXUS_PORT_READY")) return true;
+    } catch {
+      /* shell hiccup — try again */
+    }
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  return false;
 }
 
 async function streamCommandLogs(opts: {

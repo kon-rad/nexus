@@ -3,8 +3,10 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Nexus Convex schema + functions (resolves the `convex` runtime for the hand-trimmed _generated/ stubs).",
+  "description": "Nexus Convex schema + functions (resolves the `convex` runtime for the generated stubs).",
   "dependencies": {
+    "@auth/core": "^0.37.0",
+    "@convex-dev/auth": "^0.0.92",
     "convex": "^1.38.0"
   }
 }

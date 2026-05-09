@@ -16,6 +16,7 @@ import {
   ConnectionState,
   LocalParticipant,
   Participant,
+  RemoteAudioTrack,
   RemoteParticipant,
   RemoteTrack,
   RemoteTrackPublication,
@@ -77,6 +78,14 @@ export interface UseLiveKitRoomState {
   token: TokenResponse | null;
   /** Optional connection error surface. */
   error: Error | null;
+  /**
+   * True when livekit-client's autoplay attempt was blocked by the browser
+   * and the user must click "Resume audio" to hear the avatar. Surface this
+   * in the UI as a tap-to-unmute button.
+   */
+  audioBlocked: boolean;
+  /** Resume audio playback after a user gesture. No-op if not blocked. */
+  resumeAudio: () => Promise<void>;
 }
 
 /**
@@ -112,8 +121,16 @@ export function useLiveKitRoom(opts: {
   // Phase 4.4: track the sessionId pushed by the LiveKit agent's
   // start_build / modify_build tool. The agent writes
   // `{ sessionId }` onto its local participant's attributes, which surface
-  // in the room as a participant-attributes-changed event.
+  // in the room as a participant-attributes-changed event. As a fallback
+  // for older LiveKit servers that don't support attributes, we also parse
+  // it out of participant metadata (set via set_metadata).
   const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
+
+  // True when livekit-client's audio autoplay attempt was rejected by the
+  // browser. Most often happens on hard refresh of the workspace page
+  // before the user has interacted. We surface it so the UI can render a
+  // "tap to unmute" affordance.
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   // ---- Lifecycle: connect on mount, disconnect on unmount ----
   useEffect(() => {
@@ -141,23 +158,54 @@ export function useLiveKitRoom(opts: {
           _pub: RemoteTrackPublication,
           participant: RemoteParticipant,
         ) => {
-          // Only attach the avatar's video track. Audio is published by the
-          // same participant — autoPlayAudio handles routing it to <audio>.
-          if (
-            track.kind === Track.Kind.Video &&
-            isAvatarParticipant(participant)
-          ) {
+          if (!isAvatarParticipant(participant)) return;
+          if (track.kind === Track.Kind.Video) {
             setAvatarVideoTrack(track as RemoteVideoTrack);
-          }
-          if (track.kind === Track.Kind.Audio && isAvatarParticipant(participant)) {
-            // Audio element auto-attached via track.attach() in the consumer.
+          } else if (track.kind === Track.Kind.Audio) {
+            // Explicit attach — livekit-client auto-attaches when it can,
+            // but Chrome's autoplay policy can block the implicit <audio>
+            // creation on a cold page load before the user gestures.
+            // attach() returns the same element on subsequent calls, so
+            // this is idempotent across reconnects.
+            try {
+              const audioTrack = track as RemoteAudioTrack;
+              const el = audioTrack.attach();
+              el.autoplay = true;
+              el.dataset["nexusAvatarAudio"] = "1";
+              // Append to the body so the element survives panel re-renders.
+              if (!el.isConnected) document.body.appendChild(el);
+              // If the element refuses to play (autoplay policy), surface
+              // the block so the UI can show a "tap to unmute" button.
+              el.play().catch((err) => {
+                // eslint-disable-next-line no-console
+                console.warn("[livekit] avatar audio autoplay blocked:", err);
+                setAudioBlocked(true);
+              });
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn("[livekit] failed to attach avatar audio:", e);
+            }
           }
         });
 
         room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _pub, participant) => {
-          if (track.kind === Track.Kind.Video && isAvatarParticipant(participant)) {
+          if (!isAvatarParticipant(participant)) return;
+          if (track.kind === Track.Kind.Video) {
             setAvatarVideoTrack(null);
+          } else if (track.kind === Track.Kind.Audio) {
+            try {
+              const els = (track as RemoteAudioTrack).detach();
+              for (const el of els) el.remove();
+            } catch {
+              /* track may already be gone */
+            }
           }
+        });
+
+        // livekit-client emits this when it can't autoplay audio. We mirror
+        // it into local state so the consumer can render a recovery button.
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+          setAudioBlocked(!room.canPlaybackAudio);
         });
 
         room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
@@ -189,15 +237,36 @@ export function useLiveKitRoom(opts: {
         // attribute updates surface as ParticipantAttributesChanged events on
         // the room. We also walk existing participants on connect for the
         // case where the agent set the attribute before we subscribed.
+        //
+        // Metadata fallback: older LiveKit servers don't expose participant
+        // attributes, so the Python agent falls back to set_metadata with a
+        // JSON blob. Parse `metadata` for `sessionId` so the right panel still
+        // swaps when attributes are unavailable.
         const readAgentAttrs = (p: Participant) => {
           if (isAvatarParticipant(p)) return; // Tavus participant — never carries sessionId
-          const sid = p.attributes?.["sessionId"];
-          if (typeof sid === "string" && sid) {
-            setAgentSessionId((prev) => (prev === sid ? prev : sid));
+          const fromAttrs = p.attributes?.["sessionId"];
+          if (typeof fromAttrs === "string" && fromAttrs) {
+            setAgentSessionId((prev) => (prev === fromAttrs ? prev : fromAttrs));
+            return;
+          }
+          const meta = p.metadata;
+          if (typeof meta === "string" && meta.length > 0) {
+            try {
+              const parsed = JSON.parse(meta) as { sessionId?: unknown };
+              const sid = parsed?.sessionId;
+              if (typeof sid === "string" && sid) {
+                setAgentSessionId((prev) => (prev === sid ? prev : sid));
+              }
+            } catch {
+              /* not JSON — agent may not have written sessionId yet */
+            }
           }
         };
 
         room.on(RoomEvent.ParticipantAttributesChanged, (_changed, p) => {
+          readAgentAttrs(p);
+        });
+        room.on(RoomEvent.ParticipantMetadataChanged, (_prev, p) => {
           readAgentAttrs(p);
         });
         room.on(RoomEvent.ParticipantConnected, (p) => {
@@ -213,6 +282,17 @@ export function useLiveKitRoom(opts: {
           setLocalMicTrack(micPub.track.mediaStreamTrack);
         }
         setMicEnabled(true);
+
+        // Best-effort kick of audio playback. setMicrophoneEnabled above
+        // counts as a user gesture (it's the result of getUserMedia which
+        // requires a click), so on a fresh page load this usually succeeds
+        // and unblocks <audio> autoplay for the avatar's track.
+        try {
+          await room.startAudio();
+          setAudioBlocked(!room.canPlaybackAudio);
+        } catch {
+          setAudioBlocked(true);
+        }
 
         // Walk the participants the agent may have already populated before
         // our event listener was attached.
@@ -248,6 +328,18 @@ export function useLiveKitRoom(opts: {
       setLocalMicTrack(pub?.track?.mediaStreamTrack ?? null);
     }
   }, [micEnabled]);
+
+  const resumeAudio = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.startAudio();
+      setAudioBlocked(!room.canPlaybackAudio);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[livekit] resumeAudio failed:", e);
+    }
+  }, []);
 
   const endCall = useCallback(async () => {
     const r = roomRef.current;
@@ -285,6 +377,8 @@ export function useLiveKitRoom(opts: {
     token,
     error,
     sessionId,
+    audioBlocked,
+    resumeAudio,
   };
 }
 

@@ -35,9 +35,20 @@ export interface NexusSandbox {
   /** The underlying SDK handle, kept around for fs/process calls. */
   sdk: Sandbox;
   /**
+   * Absolute path to the sandbox's working directory. Resolved once on wrap()
+   * via `sandbox.getWorkDir()`. Hardcoding `/home/daytona` was fragile because
+   * the value depends on the sandbox image's WORKDIR. All shell commands
+   * (`cd`, `npm install`, `npm start`) and absolute file uploads should use
+   * this path.
+   */
+  workDir: string;
+  /**
    * Resolve a signed preview URL for a port the generated app is listening on.
    * Daytona auto-opens the port if closed; the URL stays valid for the
-   * sandbox's lifetime.
+   * sandbox's lifetime. The token (when present) is appended to the URL as
+   * a query param so the iframe can render it without an Authorization
+   * header. Sandboxes created with `public: true` return URLs without a
+   * token and are returned unchanged.
    */
   getPreviewUrl: (port: number) => Promise<{ url: string; token?: string }>;
 }
@@ -58,8 +69,13 @@ export async function createSandbox(sessionId: string): Promise<NexusSandbox> {
     envVars: {
       NODE_ENV: "development",
     },
+    // Public preview ports — without this, getPreviewLink returns a private
+    // URL that requires an Authorization header, which the browser iframe
+    // cannot send. The sandbox itself is still scoped to our API key; only
+    // the per-port preview proxy becomes anonymously reachable.
+    public: true,
   });
-  return wrap(sandbox);
+  return await wrap(sandbox);
 }
 
 /**
@@ -86,19 +102,45 @@ export async function getOrCreateSandbox(
         return createSandbox(sessionId);
       }
     }
-    return wrap(sandbox);
+    return await wrap(sandbox);
   } catch {
     return createSandbox(sessionId);
   }
 }
 
-function wrap(sdk: Sandbox): NexusSandbox {
+async function wrap(sdk: Sandbox): Promise<NexusSandbox> {
+  // Resolve the working directory once. Falls back to `/home/daytona`
+  // (Daytona's historical default for `language: "typescript"` images) if
+  // the SDK's getWorkDir returns nothing — keeps older deploys working.
+  let workDir = "/home/daytona";
+  try {
+    const resolved = await sdk.getWorkDir();
+    if (typeof resolved === "string" && resolved.length > 0) {
+      workDir = resolved;
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[daytona] getWorkDir() failed; falling back to ${workDir}:`,
+      e,
+    );
+  }
   return {
     sandboxId: sdk.id,
     sdk,
+    workDir,
     getPreviewUrl: async (port: number) => {
       const link = await sdk.getPreviewLink(port);
-      return { url: link.url, token: link.token };
+      // Public sandboxes return a token-less URL. For private sandboxes the
+      // browser iframe can't send headers, so we splice the token in as a
+      // query param using Daytona's documented preview-token name.
+      let url = link.url;
+      const token = link.token;
+      if (token) {
+        const sep = url.includes("?") ? "&" : "?";
+        url = `${url}${sep}DAYTONA_SANDBOX_AUTH_KEY=${encodeURIComponent(token)}`;
+      }
+      return { url, token };
     },
   };
 }

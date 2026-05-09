@@ -5,10 +5,16 @@
  * The State table in `docs/coding-agent-architecture.md` §3 is the source of truth.
  */
 
+import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Convex Auth tables — `users`, `authSessions`, `authAccounts`, `authVerificationCodes`,
+  // `authRefreshTokens`, `authVerifiers`, `authRateLimits`. Spread in so Google sign-in
+  // works without us rolling our own user table.
+  ...authTables,
+
   /** One row per user prompt session. Created when POST /api/session lands. */
   sessions: defineTable({
     userId: v.optional(v.string()),

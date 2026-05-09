@@ -43,7 +43,14 @@ export function CodeInspection({
     () => (filesRaw as LiveFile[] | undefined) ?? [],
     [filesRaw],
   );
-  const live = sessionId !== null && files.length > 0;
+  // A session exists — even if no files have been written yet. We use this to
+  // suppress the marketing demo so users don't mistake a real (but file-less)
+  // build for stale UI.
+  const sessionActive = sessionId !== null;
+  // Files have actually started landing.
+  const live = sessionActive && files.length > 0;
+  // Convex hasn't responded yet.
+  const loading = sessionActive && filesRaw === undefined;
 
   // Active file: the most-recently-written file (files are returned newest-first).
   // The user can override by clicking another file in the tree.
@@ -106,21 +113,25 @@ export function CodeInspection({
                 : "1px solid var(--border-subtle)",
             }}
           >
-            {live ? "STREAMING" : "IDLE"}
+            {live ? "STREAMING" : sessionActive ? "WAITING" : "IDLE"}
           </span>
         </div>
-        {live
-          ? liveTree.map((n, i) => (
-              <FileTreeNode
-                key={`${n.type}-${n.name}-${i}`}
-                node={n}
-                activePath={activePath ?? undefined}
-                onPick={setPickedPath}
-              />
-            ))
-          : FILE_TREE.map((n, i) => (
-              <FileTreeNode key={`${n.type}-${n.name}-${i}`} node={n} />
-            ))}
+        {live ? (
+          liveTree.map((n, i) => (
+            <FileTreeNode
+              key={`${n.type}-${n.name}-${i}`}
+              node={n}
+              activePath={activePath ?? undefined}
+              onPick={setPickedPath}
+            />
+          ))
+        ) : sessionActive ? (
+          <EmptyTree loading={loading} />
+        ) : (
+          FILE_TREE.map((n, i) => (
+            <FileTreeNode key={`${n.type}-${n.name}-${i}`} node={n} />
+          ))
+        )}
       </div>
 
       {/* EDITOR */}
@@ -146,7 +157,12 @@ export function CodeInspection({
             background: "rgba(0, 0, 0, 0.2)",
           }}
         >
-          <Breadcrumbs path={activePath ?? "src/components/TodoList.tsx"} />
+          <Breadcrumbs
+            path={
+              activePath ??
+              (sessionActive ? "(no files yet)" : "src/components/TodoList.tsx")
+            }
+          />
         </div>
         <div
           style={{
@@ -159,6 +175,8 @@ export function CodeInspection({
         >
           {activeFile ? (
             <PlainSourceView content={activeFile.content} />
+          ) : sessionActive ? (
+            <EmptyEditor loading={loading} />
           ) : (
             <TokenView lines={CODE_LINES} />
           )}
@@ -179,15 +197,26 @@ export function CodeInspection({
           }}
         >
           <span style={{ color: "var(--accent-cyan)" }}>
-            ● {activeFile ? detectLang(activeFile.path) : "TypeScript React"}
+            ●{" "}
+            {activeFile
+              ? detectLang(activeFile.path)
+              : sessionActive
+              ? "—"
+              : "TypeScript React"}
           </span>
           <span>UTF-8</span>
           <span>LF</span>
           <div style={{ flex: 1 }} />
           <span>
-            Ln {activeFile ? activeFile.content.split(/\r?\n/).length : CODE_LINES.length}, Col 1
+            Ln{" "}
+            {activeFile
+              ? activeFile.content.split(/\r?\n/).length
+              : sessionActive
+              ? 0
+              : CODE_LINES.length}
+            , Col 1
           </span>
-          <span>{live ? "Live" : "Saved"}</span>
+          <span>{live ? "Live" : sessionActive ? "Waiting" : "Saved"}</span>
         </div>
       </div>
     </div>
@@ -206,6 +235,48 @@ function PlainSourceView({ content }: { content: string }) {
         </div>
       ))}
     </>
+  );
+}
+
+function EmptyTree({ loading }: { loading: boolean }) {
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        fontSize: 12,
+        color: "var(--text-tertiary)",
+        fontFamily: "var(--font-jetbrains-mono), monospace",
+        letterSpacing: "0.02em",
+        lineHeight: 1.6,
+      }}
+    >
+      {loading
+        ? "Loading files…"
+        : "Waiting for the agent to write the first file."}
+    </div>
+  );
+}
+
+function EmptyEditor({ loading }: { loading: boolean }) {
+  return (
+    <div
+      style={{
+        padding: "24px 28px",
+        color: "var(--text-tertiary)",
+        fontFamily: "var(--font-jetbrains-mono), monospace",
+        fontSize: 12.5,
+        letterSpacing: "0.03em",
+        lineHeight: 1.7,
+      }}
+    >
+      <div style={{ color: "var(--text-secondary)", marginBottom: 6 }}>
+        {loading ? "Loading session files…" : "No files written yet."}
+      </div>
+      <div>
+        Files appear here in real time as the Cursor agent writes them. They are
+        streamed via Convex (<span className="mono">files.bySession</span>).
+      </div>
+    </div>
   );
 }
 
