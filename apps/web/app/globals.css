@@ -675,4 +675,11 @@ select.field {
   .features-grid {
     grid-template-columns: 1fr !important;
   }
+  .profile-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .usage-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
