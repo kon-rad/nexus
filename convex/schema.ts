@@ -60,6 +60,30 @@ export default defineSchema({
     ts: v.number(),
   }).index("by_session", ["sessionId", "ts"]),
 
+  /**
+   * Per-call record of a fal.ai model invocation. The orchestrator inserts a
+   * row when the agent calls run_fal_model, then patches it as the queue
+   * progresses (queued → in_progress → completed/error). The Generate tab
+   * subscribes to this table to render typed previews.
+   */
+  falJobs: defineTable({
+    sessionId: v.id("sessions"),
+    requestId: v.optional(v.string()),
+    endpointId: v.string(),
+    displayName: v.optional(v.string()),
+    category: v.optional(v.string()),
+    input: v.any(),
+    status: v.string(),
+    queuePosition: v.optional(v.number()),
+    output: v.optional(v.any()),
+    outputKind: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_session", ["sessionId", "createdAt"])
+    .index("by_request", ["requestId"]),
+
   /** Daytona sandbox state for the Live Preview iframe URL bar. */
   sandbox: defineTable({
     sessionId: v.id("sessions"),

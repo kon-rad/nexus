@@ -24,6 +24,7 @@ export type TableNames =
   | "events"
   | "files"
   | "logs"
+  | "falJobs"
   | "sandbox";
 
 export type SystemTableNames = "_scheduled_functions" | "_storage";
