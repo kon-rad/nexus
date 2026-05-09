@@ -2,14 +2,25 @@
   "name": "@nexus/orchestrator",
   "version": "0.0.1",
   "private": true,
-  "description": "Nexus orchestrator — Cursor SDK + Daytona + Convex pusher (Phase 2 stub)",
+  "description": "Nexus orchestrator — Cursor SDK + Daytona + Convex pusher",
   "main": "src/index.ts",
   "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit"
   },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.12",
+    "@daytona/sdk": "^0.173.0",
+    "convex": "^1.38.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.8.5",
+    "livekit-server-sdk": "^2.10.2"
+  },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "@types/node": "^20.16.10"
+    "@types/node": "^20.16.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
   }
 }
