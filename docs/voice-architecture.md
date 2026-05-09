@@ -21,7 +21,7 @@ The **LiveKit Agent worker** (Python, `services/livekit-agent/`) is the single p
 1. Joins the LiveKit room as an agent participant.
 2. Constructs an `AgentSession` whose `llm` is `livekit.plugins.google.beta.realtime.RealtimeModel` (Gemini Live).
 3. Wraps the session in `livekit.plugins.tavus.AvatarSession(replica_id, persona_id)` — Tavus's BYO-LLM mode where the avatar plugin **subscribes to the agent's audio output** and re-publishes synced audio + 1080p video into the room.
-4. Registers Python `@function_tool` handlers (e.g. `start_build`). When Gemini emits a tool call, the handler runs **in the agent process** and POSTs to the orchestrator's HTTP endpoint. The Phase 3 build only exposes a no-op `chat_status` tool; the real `start_build` lands in Phase 4.
+4. Registers three Python `@function_tool` handlers — `start_build`, `modify_build`, `web_search`. When Gemini emits a tool call, the handler runs **in the agent process**. `start_build` and `modify_build` POST to the orchestrator (`/api/avatar/tool-call`); `web_search` calls Tavily directly and returns results back into Gemini's context. (Phase 3 shipped a no-op `chat_status` placeholder; Phase 4 replaces it.)
 
 The **orchestrator** never sees raw audio. It only ever sees HTTP tool-call payloads from the LiveKit Agent and Convex mutations that mirror agent state.
 
@@ -59,29 +59,88 @@ The LiveKit Agent listens to `AgentSession`'s `agent_state_changed` event and wr
 
 When the user starts speaking while the avatar is mid-sentence, `AgentSession` emits `user_state_changed → speaking` and Gemini Live cancels its in-flight TTS. We additionally call `session.interrupt()` defensively. Tavus respects the upstream audio cut. Verified target: ≤300 ms from "user speaks" → "avatar audio silent" (see `latency-budget.md`).
 
-## Tool-call contract (Phase 3 → Phase 4)
+## Tool-call contract (Phase 4 — locked)
 
-Phase 3 exposes one tool to make sure the wiring works end-to-end without triggering codegen:
+Three `@function_tool` handlers are registered on the LiveKit Agent. Each has a single, narrow responsibility. The model's system prompt (`services/livekit-agent/prompts/system_prompt.txt`) enforces trigger discipline.
 
-```python
-@function_tool()
-async def chat_status(self, context: RunContext, status: str) -> str:
-    """Phase 3 placeholder. The agent calls this to acknowledge it is ready.
-    Phase 4 replaces this with start_build(intent: str).
-    """
-    return f"acknowledged: {status}"
-```
-
-The Phase 4 contract (lives in `voice-architecture.md` after Phase 4.1):
+### `start_build(intent: str) -> str`
 
 ```python
 @function_tool()
 async def start_build(self, context: RunContext, intent: str) -> str:
-    """Call when the user describes something to build. Returns sessionId."""
-    # POST {intent} → orchestrator /api/session
-    # Orchestrator returns { sessionId } and broadcasts via Convex.
-    # Agent stores sessionId in room metadata so the frontend reads it.
+    """Call when the user describes a NEW application or project they want built.
+    Pass the user's intent as a single sentence. Returns a short ack the model
+    paraphrases ("on it" / "spinning up your sandbox").
+    """
+    # 1. POST {intent} → orchestrator /api/avatar/tool-call (name="start_build")
+    # 2. Orchestrator translates to internal /api/session call, returns
+    #    { sessionId, status: "started" }.
+    # 3. Agent stores sessionId in BOTH:
+    #     - `ctx.room.local_participant.set_attributes({"sessionId": ...})`
+    #     - Convex `sessions.livekitRoom` (already wired)
+    #    so the workspace's useQuery picks it up.
+    # 4. Returns `"build started"` to the model so Gemini paraphrases.
 ```
+
+Triggers: `"build me a todo app"`, `"make a snake game"`, `"scaffold a Next.js app with Tailwind"`.
+**Anti-triggers**: questions, brainstorming, hypotheticals, "what could you build?".
+
+### `modify_build(change: str) -> str`
+
+```python
+@function_tool()
+async def modify_build(self, context: RunContext, change: str) -> str:
+    """Call when the user wants to change an app already built in this session.
+    Same sandbox, same Cursor agent handle, same conversation history.
+    """
+    # 1. Read sessionId from ctx.room.local_participant.attributes (set by start_build).
+    # 2. POST {change, sessionId} → orchestrator /api/avatar/tool-call (name="modify_build")
+    # 3. Orchestrator translates to internal /api/session with the existing
+    #    sessionId — re-using `agentBySession` Map + Agent.resume(existingId).
+    # 4. Returns `"changes queued"`.
+```
+
+Triggers: `"make the buttons blue"`, `"add a confetti animation"`, `"use Postgres instead"`.
+**Anti-trigger**: a brand-new request unrelated to the current app — that's `start_build`.
+
+### `web_search(query: str) -> str` (Phase 4 — agent-side only)
+
+```python
+@function_tool()
+async def web_search(self, context: RunContext, query: str) -> str:
+    """Fetch current docs/versions/news. Returns top 5 snippets as plain text."""
+    # Calls Tavily directly from the agent process. Does NOT hit the orchestrator.
+    # Returns up to ~1500 chars; the model summarizes.
+```
+
+`web_search` is intentionally agent-side. The orchestrator only owns codegen state, so search results — which never mutate sandbox state — round-trip entirely inside the LiveKit Agent. This keeps search latency bounded by Gemini's tool-call cycle and prevents stalls in the codegen state writes. (Disabled at runtime if `TAVILY_API_KEY` is unset; the model is told via the system prompt to not call it then.)
+
+### Tool routing summary
+
+```
+start_build / modify_build  →  LiveKit Agent  →  HTTP  →  Orchestrator  →  Cursor + Daytona + Convex
+web_search                   →  LiveKit Agent  →  HTTPS (Tavily) → returns to Gemini context
+```
+
+The orchestrator never sees `web_search`. The Phase 3 `chat_status` placeholder is removed in Phase 4.
+
+### Tool-call payload — orchestrator side
+
+The agent POSTs **every** tool call (start_build, modify_build) to `POST /api/avatar/tool-call` so the orchestrator owns the dispatch logic in one place:
+
+```http
+POST /api/avatar/tool-call
+{
+  "sessionId": "<convex_session_id>",
+  "name": "start_build" | "modify_build",
+  "args": { "intent": "..." } | { "change": "..." }
+}
+
+# Response (2xx):
+{ "sessionId": "<resolved_session_id>", "status": "started" | "queued" }
+```
+
+For `start_build`, the orchestrator may resolve a *new* sessionId (if the supplied one is fresh / no codegen has run on it yet) or **return the same one if voice-only `ensureVoiceSession` row was used**. The agent always uses the returned sessionId for the room attribute write.
 
 ## Token & secret boundaries
 
