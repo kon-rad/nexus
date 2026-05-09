@@ -110,8 +110,9 @@ class NexusAgent(Agent):
         exa: ExaClient,
         session_id: str | None,
         on_session_resolved: Any = None,
+        tools: list[Any] | None = None,
     ) -> None:
-        super().__init__(instructions=SYSTEM_INSTRUCTIONS)
+        super().__init__(instructions=SYSTEM_INSTRUCTIONS, tools=tools or [])
         self._client = client
         self._exa = exa
         # The "active build session" — same as the voice session. The first
@@ -436,12 +437,25 @@ async def entrypoint(ctx: JobContext) -> None:
                 "Tavus avatar failed to start (%s) — falling back to audio-only", e
             )
 
+        # Build fal.ai tools — they need a sessionId, which is resolved above.
+        # Use a mutable holder so the lambda always sees the freshest sid even
+        # after start_build mutates NexusAgent._session_id.
+        from .tools.fal_tools import make_fal_tools
+
+        agent_holder: dict[str, Any] = {}
+        fal_tools = make_fal_tools(
+            client,
+            lambda: getattr(agent_holder.get("agent"), "_session_id", session_id),
+        )
+
         agent = NexusAgent(
             client=client,
             exa=exa,
             session_id=session_id,
             on_session_resolved=_publish_session_id,
+            tools=fal_tools,
         )
+        agent_holder["agent"] = agent
         await session.start(agent=agent, room=ctx.room)
 
         # Phase 4.5: register the live AgentSession with the narration server
