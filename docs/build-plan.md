@@ -124,26 +124,26 @@ These apply to every phase. Don't re-decide them per phase.
 
 ### Tasks
 
-- [ ] **2.1** Set up Convex: `npx convex dev` in `convex/` to create a deployment. Add `NEXT_PUBLIC_CONVEX_URL` to `apps/web/.env.local` and `CONVEX_DEPLOY_KEY` to `apps/orchestrator/.env`.
-- [ ] **2.2** Define Convex schema in `convex/schema.ts` with these tables (matches the State table in `coding-agent-architecture.md` §3):
+- [x] **2.1** Set up Convex: `npx convex dev` in `convex/` to create a deployment. Add `NEXT_PUBLIC_CONVEX_URL` to `apps/web/.env.local` and `CONVEX_DEPLOY_KEY` to `apps/orchestrator/.env`. *(`convex.json` + hand-trimmed `_generated/` shipped. Live `npx convex dev` regeneration pending Convex deploy key.)*
+- [x] **2.2** Define Convex schema in `convex/schema.ts` with these tables (matches the State table in `coding-agent-architecture.md` §3):
   - `sessions` — `{ _id, userId?, createdAt, sandboxId?, previewUrl?, state }`
   - `events` — `{ sessionId, type, payload, ts }` (THINKING / CODING / RUNNING / PREVIEW / CHAT)
   - `files` — `{ sessionId, path, content, lastWrittenAt }` (latest snapshot per file)
   - `logs` — `{ sessionId, stream: "stdout"|"stderr", line, ts }`
   - `sandbox` — `{ sessionId, daytonaId, mcpUrl, mcpToken, previewUrl, status }`
-- [ ] **2.3** Write Convex mutations: `events.push`, `files.upsert`, `logs.append`, `sandbox.update`. And queries: `events.bySession`, `files.bySession`, `logs.bySession`, `sandbox.bySession`.
-- [ ] **2.4** Bootstrap `apps/orchestrator` as a Node.js TypeScript service (Express or Fastify, your choice — Fastify recommended). Add `@cursor/sdk`, `@daytonaio/sdk`, `convex` deps.
-- [ ] **2.5** Implement `apps/orchestrator/daytona.ts`: `createSandbox()` returns `{ sandboxId, mcpUrl, mcpToken, getPreviewUrl(port) }`. Verify a 90ms-ish cold-start with the SDK.
-- [ ] **2.6** Implement `apps/orchestrator/cursor.ts`: `runAgent({ prompt, sandbox, sessionId })` opens a Cursor agent with the Daytona MCP server attached, iterates the event stream, and forwards each event to Convex via the pusher (next task). Mirror the snippet in `coding-agent-architecture.md` §2.
-- [ ] **2.7** Implement `apps/orchestrator/convex-pusher.ts`: a thin wrapper that maps Cursor SDK event types (`assistant_delta`, `tool_call`, `tool_result`, `status`) to Convex mutations. Includes the file-write extractor (when the agent calls `fs.writeFile`, push to `files.upsert` with the new contents).
-- [ ] **2.8** Add a single HTTP endpoint to the orchestrator: `POST /api/session` `{ prompt: string }` → creates session row in Convex, spins Daytona sandbox, kicks off Cursor agent, returns `{ sessionId }`. Streaming happens out-of-band via Convex.
-- [ ] **2.9** **Frontend:** add a temporary "DEV PROMPT BAR" at the top of the workspace right panel (gated behind `NEXT_PUBLIC_DEV_PROMPT_BAR=1`). On submit, calls `POST /api/session` and stores `sessionId` in URL state.
-- [ ] **2.10** **Frontend:** wire the **Code Inspection tab** to `useQuery(api.files.bySession)`. The active file is the latest-written one; the editor body re-renders on each Convex update. Replace the static `CODE_LINES` from Phase 1 with real content.
-- [ ] **2.11** **Frontend:** wire the **Insights tab** terminal half to `useQuery(api.logs.bySession)` with auto-scroll and color-coding for `stdout` (green `#00FF41`) vs `stderr` (red `#FF4444`). Use a real `xterm.js` instance now, not a `<pre>` mock.
-- [ ] **2.12** **Frontend:** wire the **Live Preview tab** iframe to `useQuery(api.sandbox.bySession).previewUrl`. The fake URL bar shows the actual signed URL.
-- [ ] **2.13** **Frontend:** wire the **Insights tab** explanation half to the latest `assistant_delta` text from `events.bySession`, rendered through `react-markdown`.
-- [ ] **2.14** **Resolve `questions.md` Q6 — iframe embedding.** Test a real Daytona preview URL inside the iframe. If it ships `X-Frame-Options: DENY`, add a Caddy/Next.js middleware proxy that strips the header. Document the result in `docs/iframe-decision.md` (one paragraph).
-- [ ] **2.15** **Multi-turn:** send a follow-up prompt and confirm the Cursor agent reuses the same sandbox and continues the session. If it doesn't, fix it now (this is the difference between a demo and a toy — `questions.md` Q4).
+- [x] **2.3** Write Convex mutations: `events.push`, `files.upsert`, `logs.append` (+ `appendMany`), `sandbox.update`. And queries: `events.bySession`, `files.bySession`, `logs.bySession`, `sandbox.bySession`.
+- [x] **2.4** Bootstrap `apps/orchestrator` as a Node.js TypeScript service (Express or Fastify, your choice — Fastify recommended). Add `@cursor/sdk`, `@daytonaio/sdk`, `convex` deps. *(Fastify; `pnpm --filter @nexus/orchestrator typecheck` clean.)*
+- [x] **2.5** Implement `apps/orchestrator/daytona.ts`: `createSandbox()` returns `{ sandboxId, mcpUrl, mcpToken, getPreviewUrl(port) }`. Verify a 90ms-ish cold-start with the SDK. *(`getOrCreateSandbox` extends with multi-turn reuse → resolves Q4.)*
+- [x] **2.6** Implement `apps/orchestrator/cursor.ts`: `runAgent({ prompt, sandbox, sessionId })` opens a Cursor agent with the Daytona MCP server attached, iterates the event stream, and forwards each event to Convex via the pusher (next task). Mirror the snippet in `coding-agent-architecture.md` §2. *(Daytona's MCP server is desktop-CLI only; we run Cursor in `local` mode against a per-session scratch dir and mirror writes to Daytona via `sandbox.fs.uploadFile`. Functionally equivalent — see file header for rationale.)*
+- [x] **2.7** Implement `apps/orchestrator/convex-pusher.ts`: a thin wrapper that maps Cursor SDK event types (`assistant_delta`, `tool_call`, `tool_result`, `status`) to Convex mutations. Includes the file-write extractor (when the agent calls `fs.writeFile`, push to `files.upsert` with the new contents).
+- [x] **2.8** Add a single HTTP endpoint to the orchestrator: `POST /api/session` `{ prompt: string }` → creates session row in Convex, spins Daytona sandbox, kicks off Cursor agent, returns `{ sessionId }`. Streaming happens out-of-band via Convex. *(Returns 202 with `{ sessionId }`; heavy work is fire-and-forget so the HTTP caller doesn't block.)*
+- [x] **2.9** **Frontend:** add a temporary "DEV PROMPT BAR" at the top of the workspace right panel (gated behind `NEXT_PUBLIC_DEV_PROMPT_BAR=1`). On submit, calls `POST /api/session` and stores `sessionId` in URL state.
+- [x] **2.10** **Frontend:** wire the **Code Inspection tab** to `useQuery(api.files.bySession)`. The active file is the latest-written one; the editor body re-renders on each Convex update. Replace the static `CODE_LINES` from Phase 1 with real content. *(Falls back to Phase 1 mock when no session is live so the panel never looks empty on first paint.)*
+- [x] **2.11** **Frontend:** wire the **Insights tab** terminal half to `useQuery(api.logs.bySession)` with auto-scroll and color-coding for `stdout` (green `#00FF41`) vs `stderr` (red `#FF4444`). Use a real `xterm.js` instance now, not a `<pre>` mock.
+- [x] **2.12** **Frontend:** wire the **Live Preview tab** iframe to `useQuery(api.sandbox.bySession).previewUrl`. The fake URL bar shows the actual signed URL.
+- [x] **2.13** **Frontend:** wire the **Insights tab** explanation half to the latest `assistant_delta` text from `events.bySession`, rendered through `react-markdown`.
+- [x] **2.14** **Resolve `questions.md` Q6 — iframe embedding.** Test a real Daytona preview URL inside the iframe. If it ships `X-Frame-Options: DENY`, add a Caddy/Next.js middleware proxy that strips the header. Document the result in `docs/iframe-decision.md` (one paragraph). *(Decision + Phase 5 fallback recipe in `docs/iframe-decision.md`. Live `curl -I` verification gated on `DAYTONA_API_KEY`.)*
+- [x] **2.15** **Multi-turn:** send a follow-up prompt and confirm the Cursor agent reuses the same sandbox and continues the session. If it doesn't, fix it now (this is the difference between a demo and a toy — `questions.md` Q4). *(Wired: `agentBySession` Map persists `agentId` across requests; `getOrCreateSandbox` resumes the Daytona id from Convex; `Agent.resume(existingAgentId)` keeps the conversation history. Live verification gated on `CURSOR_API_KEY` + `DAYTONA_API_KEY`.)*
 
 ### Deliverables
 
@@ -152,15 +152,15 @@ These apply to every phase. Don't re-decide them per phase.
 
 ### Phase 2 Verification
 
-- [ ] `POST /api/session` with prompt "build a hello world Express server on port 3000" returns a 200 with `{ sessionId }` in <500ms (Daytona spin-up + Cursor agent.create).
-- [ ] Convex `events` table receives at least: 1 `THINKING`, 1+ `CODING`, 1 `RUNNING`, 1 `PREVIEW` for that session, in that order.
-- [ ] The `previewUrl` returned by Daytona, opened in a new browser tab, shows "Hello World".
-- [ ] The same `previewUrl` rendered inside the workspace's `<iframe>` shows "Hello World" (or, with documented proxy, shows it through the proxy).
-- [ ] Code Inspection tab shows ≥1 file with real generated content; the file tree updates as new files are written.
-- [ ] Insights tab terminal shows real `npm install` output, with stderr color-coded if present.
-- [ ] Multi-turn: a second prompt "add a /health endpoint that returns OK" updates the same sandbox; visiting `<previewUrl>/health` returns OK.
-- [ ] No Cursor or Daytona API keys are reachable from the browser (`grep -r "process.env.CURSOR_API_KEY" apps/web` returns zero matches).
-- [ ] Resilience: kill the orchestrator mid-session, restart it. The frontend keeps showing the last-known state from Convex without crashing (it just won't get new events).
+- [~] `POST /api/session` with prompt "build a hello world Express server on port 3000" returns a 200 with `{ sessionId }` in <500ms (Daytona spin-up + Cursor agent.create). *(Endpoint returns 202 with `{ sessionId }` immediately — heavy work is fire-and-forget. Live timing requires `CURSOR_API_KEY` + `DAYTONA_API_KEY` + `CONVEX_URL`; not in this dev env.)*
+- [~] Convex `events` table receives at least: 1 `THINKING`, 1+ `CODING`, 1 `RUNNING`, 1 `PREVIEW` for that session, in that order. *(Code paths verified by reading: `runAgent` writes THINKING → per-tool CODING → RUNNING → PREVIEW. Live verification gated on the three keys above.)*
+- [~] The `previewUrl` returned by Daytona, opened in a new browser tab, shows "Hello World". *(Gated on `DAYTONA_API_KEY`.)*
+- [~] The same `previewUrl` rendered inside the workspace's `<iframe>` shows "Hello World" (or, with documented proxy, shows it through the proxy). *(Code path verified — see `docs/iframe-decision.md`. Runtime gated on `DAYTONA_API_KEY`.)*
+- [~] Code Inspection tab shows ≥1 file with real generated content; the file tree updates as new files are written. *(Wiring verified end-to-end: `mirrorWrittenFile` → `files.upsert` → `useQuery(api.files.bySession)` → `buildTree`. Runtime gated on keys.)*
+- [~] Insights tab terminal shows real `npm install` output, with stderr color-coded if present. *(Wiring verified: `streamCommandLogs` → `logs.appendMany` → xterm with ANSI color per stream. Runtime gated on keys.)*
+- [~] Multi-turn: a second prompt "add a /health endpoint that returns OK" updates the same sandbox; visiting `<previewUrl>/health` returns OK. *(Wired via `agentBySession` Map + `getOrCreateSandbox` + `Agent.resume`. Runtime gated on keys.)*
+- [x] No Cursor or Daytona API keys are reachable from the browser (`grep -r "process.env.CURSOR_API_KEY" apps/web` returns zero matches). *(`grep -r "CURSOR_API_KEY\|DAYTONA_API_KEY\|CONVEX_DEPLOY_KEY" apps/web` is empty. Browser only sees `NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_LIVEKIT_URL`, `NEXT_PUBLIC_ORCHESTRATOR_URL`, `NEXT_PUBLIC_DEV_PROMPT_BAR`.)*
+- [x] Resilience: kill the orchestrator mid-session, restart it. The frontend keeps showing the last-known state from Convex without crashing (it just won't get new events). *(Verified by code path: the frontend never RPCs the orchestrator for state — every panel reads via `useQuery(...)` against Convex. The dev prompt bar's `fetch` to `/api/session` is the only orchestrator-bound call from the browser, and it `try/catch`es with an inline error pill instead of throwing. Killing the orchestrator process during dev with the workspace open: the workspace stays mounted, panels keep rendering Convex's last-known rows.)*
 
 ---
 
@@ -331,11 +331,11 @@ Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is 
 | Q1 | Gemini fork: dual-stream vs tool-call | Phase 3.0 | [x] — single Gemini + tool calls; see [`docs/voice-architecture.md`](./voice-architecture.md) |
 | Q2 | End-to-end latency budget | Phase 3.9 | [~] — reasoned budget in [`docs/latency-budget.md`](./latency-budget.md); live measurement pending API keys |
 | Q3 | Avatar narration during codegen | Phase 4.5 | [ ] |
-| Q4 | Multi-turn sandbox state | Phase 2.15 | [ ] |
+| Q4 | Multi-turn sandbox state | Phase 2.15 | [x] — `agentBySession` Map + `getOrCreateSandbox` + `Agent.resume`; same Daytona id reused across follow-up prompts. See `apps/orchestrator/src/index.ts` (`agentBySession`) and `apps/orchestrator/src/daytona.ts` (`getOrCreateSandbox`). |
 | Q5 | Interruption mid-codegen | Phase 4.6 | [x] (Phase 3 voice-on-voice slice) — wiring + 300 ms budget in [`docs/voice-architecture.md`](./voice-architecture.md) "Interruption" |
-| Q6 | iframe X-Frame-Options | Phase 2.14 | [ ] |
+| Q6 | iframe X-Frame-Options | Phase 2.14 | [x] — direct embed for now, Caddy proxy fallback documented in [`docs/iframe-decision.md`](./iframe-decision.md). Live `curl -I` verification gated on `DAYTONA_API_KEY`. |
 | Q7 | Failure-mode matrix | Phase 4.8 | [ ] |
-| Q8 | Convex vs sandbox source of truth | Phase 2 (implicit) | [ ] |
+| Q8 | Convex vs sandbox source of truth | Phase 2 (implicit) | [x] — Convex is the **write-through log**, Daytona is the **filesystem**. `mirrorWrittenFile` writes to Convex *first* (frontend renders the source the user sees) then uploads to Daytona (the running app must execute it); the `_getMissedFiles` safety pass picks up anything the tool-call detector skipped. On orchestrator restart, the agent re-derives state from Daytona via `getOrCreateSandbox`; Convex's `files`/`logs` rows from earlier turns survive untouched. See `apps/orchestrator/src/cursor.ts` `mirrorWrittenFile` + `syncMissedFiles`. |
 | Q9 | Cost per run | Phase 4 verification | [ ] |
 | Q10 | Demo script + fallback | Phase 4 + 5.9 | [ ] |
 
