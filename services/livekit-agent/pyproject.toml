@@ -1,0 +1,54 @@
+[project]
+name = "nexus-livekit-agent"
+version = "0.1.0"
+description = "Nexus voice + avatar worker — LiveKit Agents (Python) with Gemini Live + Tavus BYO."
+requires-python = ">=3.11,<3.15"
+readme = "README.md"
+license = { text = "MIT" }
+
+# LiveKit Agents 1.5.x supports Python 3.10–3.14 per PyPI classifiers.
+# We tested with 3.13 (the system Python on this dev machine).
+dependencies = [
+    "livekit-agents[google,tavus]>=1.5.0,<2.0.0",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.2",
+    "pydantic>=2.9.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.385",
+    "ruff>=0.7.0",
+]
+
+[project.scripts]
+nexus-agent = "nexus_agent.worker:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexus_agent"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+# We use "standard" rather than "strict" because livekit-agents 1.5 ships
+# generics whose type args aren't specified (`AgentSession[Unknown]` etc) —
+# strict mode complains about every consumer of those generics. Standard mode
+# still catches real bugs (missing attrs, wrong arg types, undefined names).
+typeCheckingMode = "standard"
+reportMissingImports = "warning"  # plugins are optional installs in CI
+reportMissingTypeStubs = "none"
+reportUnusedFunction = "none"  # @session.on() handlers look unused but aren't
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
