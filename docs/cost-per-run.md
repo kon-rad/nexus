@@ -1,6 +1,6 @@
 # Nexus Cost Per Run
 
-> Resolves `questions.md` Q9. Marked `[~]` because **live measurement against real keys is not possible in this dev environment** — we don't have Cursor, Daytona, Tavus, Gemini Live, or LiveKit Cloud production keys here. This file therefore documents (a) the per-call cost model from each provider's public pricing, (b) a derived per-demo-run estimate, and (c) the measurement protocol Phase 5 will run against the production droplet to confirm the numbers.
+> Resolves `questions.md` Q9. Marked `[~]` because **live measurement against real keys is not possible in this dev environment** — we don't have Cursor, Daytona, Tavus, Gemini Live, or LiveKit Cloud production keys here. This file therefore documents (a) the per-call cost model from each provider's public pricing, (b) a derived per-demo-run estimate, and (c) the measurement protocol to run against the DigitalOcean droplet to confirm the numbers.
 
 ## Cost model — per service
 
@@ -44,7 +44,7 @@ Targeted: **~50 practice runs + 5 judge sessions + 1 stage demo = 56 runs.**
 | Gemini Live spike pad (1.2×) | — | +$3 |
 | **Practice + demo budget** | | **~$150** |
 
-Add **another $50 for the warm-spare droplet's idle time + LiveKit Cloud bandwidth headroom** if Phase 5.10 ships → **~$200 ceiling.**
+Add **another $50 for an optional warm-spare droplet's idle time + LiveKit Cloud bandwidth headroom** → **~$200 ceiling.**
 
 ## What we measured live
 
@@ -54,7 +54,7 @@ Add **another $50 for the warm-spare droplet's idle time + LiveKit Cloud bandwid
 - The orchestrator's structured pino-pretty logs include `tool: <name>` markers + `[narration] flushed` markers; a 5-minute `pm2 logs` capture during the canonical demo run gives us start_build / modify_build / cancel counts.
 - The LiveKit agent logs `agent_state_changed` transitions; per-session totals tell us how many minutes of Gemini Live + Tavus we burned.
 
-When Phase 5 stands up the production droplet, we'll run the canonical demo three times and dump:
+Once the production droplet is live, we'll run the canonical demo three times and dump:
 
 ```
 docs/cost-per-run.actual.md
@@ -65,7 +65,7 @@ docs/cost-per-run.actual.md
 
 ## Pre-run cost gate (optional)
 
-For Phase 5.10 (warm spare) we can wire `/api/health` to refuse new sessions when the budget hits 80% of cap by reading a daily usage counter from Convex. **Not implementing for the hackathon** — the per-run cost is bounded enough that runaway is unlikely.
+If we ever bring up a warm-spare droplet, we can wire `/api/health` to refuse new sessions when the budget hits 80% of cap by reading a daily usage counter from Convex. **Not implementing for the hackathon** — the per-run cost is bounded enough that runaway is unlikely.
 
 ## Cheapest viable demo (cost floor)
 
@@ -78,7 +78,7 @@ If we have to demo with $10 in keys total:
 
 That puts the per-run floor at **~$0.60** — viable for ~16 demo runs on $10 in keys, more if Tavus stays in audio-only fallback.
 
-## Open items for Phase 5
+## Open items for the production droplet
 
 - [ ] Run the canonical demo three times against production. Dump observed cost.
 - [ ] Wire `/api/health` cost gate (optional).

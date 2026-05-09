@@ -36,7 +36,7 @@ The matrix above assumes one failure at a time. The real demo failure mode is tw
 | Combined failure | Behavior |
 |---|---|
 | Tavus offline AND Daytona slow | Audio-only fallback for the avatar + build-error banner once the Daytona retry trips. The orchestrator narrates "still spinning up — sandbox is taking longer than usual" through the Phase 4.5 narration channel so the user knows we're not frozen. |
-| Convex disconnect AND Gemini Live drop | Worst-case demo state. The waveform freezes, the panels freeze. The orchestrator's in-process buffer absorbs Cursor events; once Convex returns, panels catch up. **Phase 5.9 fallback video** is the recovery path for stage if both fail at once. |
+| Convex disconnect AND Gemini Live drop | Worst-case demo state. The waveform freezes, the panels freeze. The orchestrator's in-process buffer absorbs Cursor events; once Convex returns, panels catch up. The pre-recorded fallback video is the recovery path for stage if both fail at once. |
 | Orchestrator down AND user already mid-session | Voice + avatar keep going (LiveKit + Gemini + Tavus don't talk to the orchestrator after handshake). New tool calls fail gracefully ("could not reach the build system"). |
 
 ## How we know the matrix is wired
@@ -48,5 +48,5 @@ The matrix above assumes one failure at a time. The real demo failure mode is tw
 ## What's deliberately NOT covered here
 
 - **Mic permission denied.** Browser-level. Surfaced by `livekit-client` as a connect error → falls under #4.
-- **HTTPS cert expiry.** Phase 5 / Caddy. Out of scope for the dev/demo path.
+- **HTTPS cert expiry.** Handled by the DigitalOcean droplet's Caddy config. Out of scope for the dev/demo path.
 - **Quota exhaustion** (Tavus minutes, Gemini Live tokens). Tracked in `docs/cost-per-run.md`; the failure looks like #3 or #4 with a 429.

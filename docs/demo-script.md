@@ -108,7 +108,7 @@ Between t=0:08 and t=0:35 the Cursor agent is mid-codegen. The narration channel
 | Failure | Fallback | Demo recovery |
 |---|---|---|
 | Tavus video doesn't load | Orb fallback already shipped (`<TavusAvatar>` Phase 3). Failure-banner says "audio-only". | Continue — voice still works. Mention the banner once, smile, move on. |
-| Daytona sandbox 4xx | `/api/health` flags `daytonaKey: false` if the key is missing. Live errors surface as Convex `state: "ERROR"` with `statusMessage`. | Switch to the pre-recorded video fallback (Phase 5.9). |
+| Daytona sandbox 4xx | `/api/health` flags `daytonaKey: false` if the key is missing. Live errors surface as Convex `state: "ERROR"` with `statusMessage`. | Switch to the pre-recorded video fallback. |
 | Cursor 5xx mid-stream | Run cancels; orchestrator marks state ERROR. Avatar should apologize per system prompt: *"That call timed out — let me try again."* | Re-utter the original `start_build` request. |
 | Gemini Live drops | LiveKit agent reconnects automatically; we mirror to Convex `endReason: "reconnect"` if the gap exceeds ~3 s. | Pause for 3 s; the badge will go red. If it doesn't recover in 5 s, switch to fallback video. |
 

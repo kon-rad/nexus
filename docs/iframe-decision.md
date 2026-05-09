@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-Daytona preview URLs (`https://3000-{sandbox-id}.daytona.work` / `.proxy.daytona.work`) are designed for embedding and ship without `X-Frame-Options` and without a frame-ancestor-restrictive `Content-Security-Policy`. We embed them in `<iframe sandbox="allow-scripts allow-same-origin allow-forms allow-popups">` directly from the workspace and do **not** need a same-origin proxy on our orchestrator/Caddy in dev. Phase 5 holds a Caddy `header_down -X-Frame-Options` block in reserve for the production domain, in case Daytona later changes default headers.
+Daytona preview URLs (`https://3000-{sandbox-id}.daytona.work` / `.proxy.daytona.work`) are designed for embedding and ship without `X-Frame-Options` and without a frame-ancestor-restrictive `Content-Security-Policy`. We embed them in `<iframe sandbox="allow-scripts allow-same-origin allow-forms allow-popups">` directly from the workspace and do **not** need a same-origin proxy on our orchestrator/Caddy in dev. The DigitalOcean droplet's Caddyfile holds a `header_down -X-Frame-Options` block in reserve for the production domain, in case Daytona later changes default headers.
 
 ## What we tested
 
@@ -12,7 +12,7 @@ Daytona preview URLs (`https://3000-{sandbox-id}.daytona.work` / `.proxy.daytona
 - The web app's `LivePreview` component (`apps/web/app/workspace/LivePreview.tsx`) renders the URL inside an `<iframe>` with a `sandbox` attribute that *only* permits the scripts/forms/popups the generated app needs. We deliberately do **not** allow `allow-top-navigation` (no escape) or `allow-pointer-lock` (no UX hijack).
 - Live HTTP-header verification with `curl -I` against a real preview URL is gated on a working `DAYTONA_API_KEY`. The agent did not have one in this environment; the verification box in `docs/build-plan.md` is therefore `[~]` with this file as the resolution.
 
-## Fallback plan (Phase 5)
+## Fallback plan (production)
 
 If a future Daytona release ships `X-Frame-Options: DENY` or a strict CSP `frame-ancestors`, we have two levers, in order of preference:
 

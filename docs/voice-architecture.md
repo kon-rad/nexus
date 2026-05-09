@@ -182,8 +182,8 @@ Phase 3 only verifies that voice-on-voice interruption holds.
 
 - **Cursor / Daytona orchestration.** Phase 2's territory.
 - **start_build wiring + dead-air narration.** Phase 4 (Q3, Q5 codegen variant).
-- **Failure-mode UI** (Tavus down → audio-only fallback). Phase 4.8 / 5.
-- **Production deployment.** Phase 5.
+- **Failure-mode UI** (Tavus down → audio-only fallback). Phase 4.8.
+- **Production deployment.** Lives on the team's DigitalOcean droplet, tracked outside this plan.
 
 ---
 

@@ -197,7 +197,7 @@ If you wanted Tavus to use Gemini *directly* (no LiveKit, no BYO), the lever wou
 
 - **Avatar narration during long codegen** (`build-plan.md` 4.5 / `questions.md` Q3). This needs a side channel from the orchestrator → LiveKit Agent → Gemini synthetic-message API. Tracked separately.
 - **Failure-mode UI** (`build-plan.md` 4.8). Tavus offline → audio-only fallback. Tracked in Phase 4.8.
-- **Production Tavus persona** with a custom replica. Phase 5 polish.
+- **Production Tavus persona** with a custom replica. Deploy-side polish, tracked outside this plan.
 - **Web search caching**. If the same query repeats, we re-call Exa. Fine for hackathon.
 
 ---
