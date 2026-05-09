@@ -1,4 +1,4 @@
-# Nexus — 5-Phase Incremental Build Plan
+# Nexus — Incremental Build Plan
 
 > **For future agents.** This is the operational playbook for building Nexus from empty repo to demo-ready app. Each phase ships an independently demoable artifact, has explicit verification criteria, and references the specific source-of-truth docs you should re-read before starting work in that phase.
 >
@@ -142,7 +142,7 @@ These apply to every phase. Don't re-decide them per phase.
 - [x] **2.11** **Frontend:** wire the **Insights tab** terminal half to `useQuery(api.logs.bySession)` with auto-scroll and color-coding for `stdout` (green `#00FF41`) vs `stderr` (red `#FF4444`). Use a real `xterm.js` instance now, not a `<pre>` mock.
 - [x] **2.12** **Frontend:** wire the **Live Preview tab** iframe to `useQuery(api.sandbox.bySession).previewUrl`. The fake URL bar shows the actual signed URL.
 - [x] **2.13** **Frontend:** wire the **Insights tab** explanation half to the latest `assistant_delta` text from `events.bySession`, rendered through `react-markdown`.
-- [x] **2.14** **Resolve `questions.md` Q6 — iframe embedding.** Test a real Daytona preview URL inside the iframe. If it ships `X-Frame-Options: DENY`, add a Caddy/Next.js middleware proxy that strips the header. Document the result in `docs/iframe-decision.md` (one paragraph). *(Decision + Phase 5 fallback recipe in `docs/iframe-decision.md`. Live `curl -I` verification gated on `DAYTONA_API_KEY`.)*
+- [x] **2.14** **Resolve `questions.md` Q6 — iframe embedding.** Test a real Daytona preview URL inside the iframe. If it ships `X-Frame-Options: DENY`, add a Caddy/Next.js middleware proxy that strips the header. Document the result in `docs/iframe-decision.md` (one paragraph). *(Decision + Caddy fallback recipe in `docs/iframe-decision.md`. Live `curl -I` verification gated on `DAYTONA_API_KEY`.)*
 - [x] **2.15** **Multi-turn:** send a follow-up prompt and confirm the Cursor agent reuses the same sandbox and continues the session. If it doesn't, fix it now (this is the difference between a demo and a toy — `questions.md` Q4). *(Wired: `agentBySession` Map persists `agentId` across requests; `getOrCreateSandbox` resumes the Daytona id from Convex; `Agent.resume(existingAgentId)` keeps the conversation history. Live verification gated on `CURSOR_API_KEY` + `DAYTONA_API_KEY`.)*
 
 ### Deliverables
@@ -264,7 +264,6 @@ Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is 
 - **Stuck on Phase 2 streaming?** The Cursor SDK example in `coding-agent-architecture.md` §2 is canonical. Don't add layers; the for-await loop is the loop.
 - **Stuck on Phase 3 voice topology?** Q1 in `docs/questions.md` is the question that has to be answered first. Don't write LiveKit code until §3.0 is done.
 - **Stuck on Phase 4 narration?** Read Q3 in `docs/questions.md`. The dead-air problem is the demo killer; don't ship without a narration story.
-- **Stuck on Phase 5 deploy?** The exact commands are in `docs/coding-agent-architecture.md` §5. Caddy + PM2 + Docker LiveKit. No surprises — just execute.
 
 ---
 
@@ -280,7 +279,7 @@ Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is 
 | Q6 | iframe X-Frame-Options | Phase 2.14 | [x] — direct embed for now, Caddy proxy fallback documented in [`docs/iframe-decision.md`](./iframe-decision.md). Live `curl -I` verification gated on `DAYTONA_API_KEY`. |
 | Q7 | Failure-mode matrix | Phase 4.8 | [x] — [`docs/failure-modes.md`](./failure-modes.md) covers all six services + combined-failure scenarios + cancel/interrupt UX, with UI surfaces wired in `apps/web/app/workspace/FailureBanner.tsx` and Tavus-offline audio-only fallback in `apps/web/components/TavusAvatar.tsx` + `services/livekit-agent/src/nexus_agent/agent.py`. |
 | Q8 | Convex vs sandbox source of truth | Phase 2 (implicit) | [x] — Convex is the **write-through log**, Daytona is the **filesystem**. `mirrorWrittenFile` writes to Convex *first* (frontend renders the source the user sees) then uploads to Daytona (the running app must execute it); the `_getMissedFiles` safety pass picks up anything the tool-call detector skipped. On orchestrator restart, the agent re-derives state from Daytona via `getOrCreateSandbox`; Convex's `files`/`logs` rows from earlier turns survive untouched. See `apps/orchestrator/src/cursor.ts` `mirrorWrittenFile` + `syncMissedFiles`. |
-| Q9 | Cost per run | Phase 4 verification | [~] — model + per-run estimate (~$1.89) + hackathon budget (~$200) + measurement protocol in [`docs/cost-per-run.md`](./cost-per-run.md). Live three-run measurement gated on production keys; protocol documented for Phase 5 to run against the droplet. |
-| Q10 | Demo script + fallback | Phase 4 + 5.9 | [x] (Phase 4 half) — narrated marketing script + 3-minute operational walk-through with utterance/response/UI state/timing in [`docs/demo-script.md`](./demo-script.md). Phase 5.9 video fallback still owed. |
+| Q9 | Cost per run | Phase 4 verification | [~] — model + per-run estimate (~$1.89) + hackathon budget (~$200) + measurement protocol in [`docs/cost-per-run.md`](./cost-per-run.md). Live three-run measurement gated on production keys; protocol documented to run against the DigitalOcean droplet. |
+| Q10 | Demo script + fallback | Phase 4 | [x] — narrated marketing script + 3-minute operational walk-through with utterance/response/UI state/timing in [`docs/demo-script.md`](./demo-script.md). Pre-recorded video fallback is a separate deploy-side artifact tracked outside this plan. |
 
 When you resolve one, update the **Status** column to `[x]` and link the file/section where the answer lives.
