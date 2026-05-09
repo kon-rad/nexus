@@ -73,7 +73,7 @@ These apply to every phase. Don't re-decide them per phase.
 - [x] **1.1** Initialize pnpm workspace at repo root with `apps/web` and `apps/orchestrator` packages. Root `package.json` defines workspaces; both packages compile under `tsc --noEmit`.
 - [x] **1.2** Bootstrap `apps/web` as Next.js 14 App Router + TypeScript strict + Tailwind. Configure `next/font` for Inter and JetBrains Mono.
 - [x] **1.3** Create `apps/web/app/globals.css` with the full token set from `design-prompt.md` §1 (colors, fonts, glassmorphism mixin). Mirror the variable names in `docs/design/nexus/src/styles.css`.
-- [ ] **1.4** Build a shared component library in `apps/web/components/`:
+- [x] **1.4** Build a shared component library in `apps/web/components/`:
   - `PrimaryButton`, `GhostButton` (pill, cyan glow on hover)
   - `GlassPill` (rgba(18,18,18,0.7) + blur(12px) + border-subtle)
   - `StatusBadge` (8px circle, green/purple/cyan, pulse animation)
