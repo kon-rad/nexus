@@ -113,3 +113,9 @@ export const IconFile = (p: IconProps) => (
 export const IconFolder = (p: IconProps) => (
   <RawIcon {...p} d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
 );
+export const IconSparkle = (p: IconProps) => (
+  <RawIcon
+    {...p}
+    d="M12 3v4 M12 17v4 M3 12h4 M17 12h4 M5.6 5.6l2.8 2.8 M15.6 15.6l2.8 2.8 M5.6 18.4l2.8-2.8 M15.6 8.4l2.8-2.8"
+  />
+);
