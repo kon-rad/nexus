@@ -103,6 +103,23 @@ async def modify_build(self, context: RunContext, change: str) -> str:
 Triggers: `"make the buttons blue"`, `"add a confetti animation"`, `"use Postgres instead"`.
 **Anti-trigger**: a brand-new request unrelated to the current app — that's `start_build`.
 
+### `stop_build(reason: str = "user_cancel") -> str`
+
+```python
+@function_tool()
+async def stop_build(self, context: RunContext, reason: str = "user_cancel") -> str:
+    """Cancel the in-flight build. Aborts Cursor's Run + tears the sandbox down."""
+    # 1. POST {reason} → orchestrator /api/avatar/tool-call (name="stop_build")
+    # 2. Orchestrator calls runHandle.cancel() on the active Cursor Run, then
+    #    deleteSandbox() so the next start_build gets a fresh slate, and
+    #    writes endReason on the Convex session row so FailureBanner shows
+    #    "Build cancelled."
+    # 3. Returns "build cancelled".
+```
+
+Triggers: `"stop"`, `"cancel that"`, `"actually nevermind"`, `"hold on, don't build that"`.
+**Anti-trigger**: an interruption that is actually a refinement (`"…and add dark mode"`) — that's `modify_build`. A clean swap to a new build (`"actually build me a snake game instead"`) is `stop_build` followed by `start_build`.
+
 ### `web_search(query: str) -> str` (Phase 4 — agent-side only)
 
 ```python
@@ -118,26 +135,26 @@ async def web_search(self, context: RunContext, query: str) -> str:
 ### Tool routing summary
 
 ```
-start_build / modify_build  →  LiveKit Agent  →  HTTP  →  Orchestrator  →  Cursor + Daytona + Convex
-web_search                   →  LiveKit Agent  →  HTTPS (Exa /answer) → returns to Gemini context
+start_build / modify_build / stop_build  →  LiveKit Agent  →  HTTP  →  Orchestrator  →  Cursor + Daytona + Convex
+web_search                                 →  LiveKit Agent  →  HTTPS (Exa /answer) → returns to Gemini context
 ```
 
 The orchestrator never sees `web_search`. The Phase 3 `chat_status` placeholder is removed in Phase 4.
 
 ### Tool-call payload — orchestrator side
 
-The agent POSTs **every** tool call (start_build, modify_build) to `POST /api/avatar/tool-call` so the orchestrator owns the dispatch logic in one place:
+The agent POSTs **every** build-lifecycle tool call (start_build, modify_build, stop_build) to `POST /api/avatar/tool-call` so the orchestrator owns the dispatch logic in one place:
 
 ```http
 POST /api/avatar/tool-call
 {
   "sessionId": "<convex_session_id>",
-  "name": "start_build" | "modify_build",
-  "args": { "intent": "..." } | { "change": "..." }
+  "name": "start_build" | "modify_build" | "stop_build",
+  "args": { "intent": "..." } | { "change": "..." } | { "reason": "..." }
 }
 
 # Response (2xx):
-{ "sessionId": "<resolved_session_id>", "status": "started" | "queued" }
+{ "sessionId": "<resolved_session_id>", "status": "started" | "queued" | "cancelled" }
 ```
 
 For `start_build`, the orchestrator may resolve a *new* sessionId (if the supplied one is fresh / no codegen has run on it yet) or **return the same one if voice-only `ensureVoiceSession` row was used**. The agent always uses the returned sessionId for the room attribute write.

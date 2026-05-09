@@ -12,5 +12,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "convex": "^1.38.0"
   }
 }

@@ -27,6 +27,19 @@ export default defineSchema({
     avatarState: v.optional(v.string()),
     /** LiveKit room name this session lives in. */
     livekitRoom: v.optional(v.string()),
+    /**
+     * Phase 4.5 — latest narration line the orchestrator forwarded to the
+     * LiveKit agent. The agent reads this to drive `session.say()` and the
+     * UI may surface it as a transcript ribbon.
+     */
+    narrationText: v.optional(v.string()),
+    /** Server timestamp of the last narration write — debounce + ordering. */
+    narrationTs: v.optional(v.number()),
+    /**
+     * Phase 4.6/4.8 — reason a session ended. "user_cancel" | "tavus_offline"
+     * | "build_error" etc. Drives the FailureBanner in the workspace.
+     */
+    endReason: v.optional(v.string()),
   }),
 
   /**

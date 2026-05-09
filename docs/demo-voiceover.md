@@ -1,6 +1,6 @@
 # Nexus — Demo Voiceover
 
-> Spoken text only. ~290 words, ~2:00 at a brisk demo pace.
+> Spoken text only. ~370 words, ~2:15 at a brisk demo pace.
 
 ---
 
@@ -12,6 +12,8 @@ Watch the panel. Ninety milliseconds in, Daytona has a fresh sandbox. Cursor's c
 
 And when I cut him off mid-sentence — he stops in under three hundred milliseconds. One Gemini model, one transcript, native interruption. Same sandbox, same conversation, multi-turn refinement.
 
-Under the hood: Gemini 3.1 Flash Live hears my voice and emits two streams on the same socket — audio for the avatar, structured tool calls for the orchestrator. The audio feeds Tavus Phoenix-4 in BYO-LLM mode — lip-synced 1080p at 40 frames a second. The tool call hits our Node orchestrator, which spawns a Cursor SDK agent. The agent talks to Daytona over MCP — directly, cloud to cloud, our server isn't even in the data path. Every event streams through Convex; the UI re-renders reactively. No polling. No WebSocket plumbing. LiveKit Agents carries it all over WebRTC.
+Ask for advice — Exa searches the live web and gives the avatar a single synthesized answer. Current docs, current versions, no training-data drift. Ask it to explain a concept — the avatar searches fal.ai's catalog, picks the right model for the job — image, video, audio, 3D, anything they host — generates the asset, and drops it into the panel. So I don't just hear the answer. I see it.
+
+Under the hood: Gemini 3.1 Flash Live emits audio and structured tool calls on the same socket. Tavus Phoenix-4 lip-syncs the audio at 1080p, 40 frames a second. Cursor SDK against a Daytona sandbox writes the code over MCP — cloud to cloud, our server isn't even in the data path. Convex streams every event reactively. Exa for research. fal.ai for any model, any output. LiveKit Agents carries it all over WebRTC.
 
 Code creation is no longer the bottleneck. Understanding is. So we built the most natural interface for understanding — a face. Nexus. Software, spoken aloud.

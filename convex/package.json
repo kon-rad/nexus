@@ -1,3 +1,10 @@
 {
-  "type": "module"
+  "name": "@nexus/convex",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Nexus Convex schema + functions (resolves the `convex` runtime for the hand-trimmed _generated/ stubs).",
+  "dependencies": {
+    "convex": "^1.38.0"
+  }
 }

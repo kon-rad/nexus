@@ -1,4 +1,4 @@
-"""Nexus voice agent: Gemini Live + Tavus BYO + three Phase 4 tools.
+"""Nexus voice agent: Gemini Live + Tavus BYO + four Phase 4 tools.
 
 The agent is a thin wrapper around livekit.agents.AgentSession:
 
@@ -16,6 +16,7 @@ to the orchestrator over HTTP, which mirrors them to Convex
 Phase 4 tools:
   - start_build(intent)  → POST /api/session  (kicks Cursor + Daytona)
   - modify_build(change) → POST /api/session  (resume same Cursor agent)
+  - stop_build(reason)   → /api/avatar/tool-call (cancels in-flight Cursor Run)
   - web_search(query)    → Exa /answer, agent-side. Never hits the orchestrator.
 """
 
@@ -101,7 +102,7 @@ DEFAULT_VOICE = os.environ.get("GEMINI_REALTIME_VOICE", "Puck")
 
 
 class NexusAgent(Agent):
-    """The voice persona. Three Phase 4 tools registered below."""
+    """The voice persona. Four Phase 4 tools registered below."""
 
     def __init__(
         self,
@@ -199,6 +200,31 @@ class NexusAgent(Agent):
             self._session_id = sid
             await self._publish_resolved_session(sid)
         return "changes queued"
+
+    @function_tool()
+    async def stop_build(self, context: RunContext, reason: str = "user_cancel") -> str:  # noqa: ARG002
+        """Cancel the in-flight build.
+
+        Call when the user says "stop", "cancel", "actually nevermind", or
+        otherwise asks you to abandon the build that is currently running.
+        The orchestrator aborts the Cursor Run and tears the sandbox down so
+        a follow-up `start_build` gets a clean slate.
+
+        Args:
+            reason: A short tag describing why we're cancelling — defaults
+                to "user_cancel". The UI surfaces this in the failure banner.
+        """
+        logger.info("tool: stop_build(reason=%r)", reason)
+        if not self._session_id:
+            return "nothing to stop — no build is running"
+        result = await self._client.tool_call(
+            session_id=self._session_id,
+            name="stop_build",
+            args={"reason": reason},
+        )
+        if result is None:
+            return "could not reach the build system — try again in a moment"
+        return "build cancelled"
 
     @function_tool()
     async def web_search(self, context: RunContext, query: str) -> str:  # noqa: ARG002

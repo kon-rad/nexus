@@ -6,15 +6,54 @@
  *
  * To regenerate, run `npx convex dev`.
  * @module
- *
- * Note: this is a hand-trimmed copy that uses `anyApi` shape so the file does
- * not transitively import `convex/*.ts` source files (which the web app's
- * tsconfig cannot resolve). Re-run `npx convex dev` to regenerate the strongly
- * typed version once Convex CLI is available locally with proper deps.
  */
 
-import { anyApi, componentsGeneric } from "convex/server";
+import type * as events from "../events.js";
+import type * as falJobs from "../falJobs.js";
+import type * as files from "../files.js";
+import type * as logs from "../logs.js";
+import type * as sandbox from "../sandbox.js";
+import type * as sessions from "../sessions.js";
 
-export declare const api: typeof anyApi;
-export declare const internal: typeof anyApi;
-export declare const components: ReturnType<typeof componentsGeneric>;
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
+
+declare const fullApi: ApiFromModules<{
+  events: typeof events;
+  falJobs: typeof falJobs;
+  files: typeof files;
+  logs: typeof logs;
+  sandbox: typeof sandbox;
+  sessions: typeof sessions;
+}>;
+
+/**
+ * A utility for referencing Convex functions in your app's public API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
+export declare const api: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "public">
+>;
+
+/**
+ * A utility for referencing Convex functions in your app's internal API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = internal.myModule.myFunction;
+ * ```
+ */
+export declare const internal: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "internal">
+>;
+
+export declare const components: {};

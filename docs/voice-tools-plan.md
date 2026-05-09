@@ -1,6 +1,6 @@
 # Voice Agent Tools — Implementation Plan
 
-> **Companion to `docs/voice-system-prompt.md` and `docs/voice-architecture.md`.** This is the concrete plan to wire the three tools (`start_build`, `modify_build`, `web_search`) referenced by the system prompt, plus the Tavus dashboard setup that has to happen before any of this can connect end-to-end.
+> **Companion to `docs/voice-system-prompt.md` and `docs/voice-architecture.md`.** This is the concrete plan to wire the four core tools (`start_build`, `modify_build`, `stop_build`, `web_search`) referenced by the system prompt, plus the Tavus dashboard setup that has to happen before any of this can connect end-to-end.
 >
 > Fits inside `docs/build-plan.md` Phase 3 (Tavus + LiveKit standup) and Phase 4 (codegen wiring). Items here **expand** Phase 4.1 — they don't replace it.
 >
@@ -49,22 +49,18 @@ The orchestrator sees `start_build` and `modify_build`. It does **not** see `web
 
 ## §1 — Doc updates
 
-- [ ] **1.1** Update `docs/voice-architecture.md` § "Tool-call contract (Phase 3 → Phase 4)" to enumerate all three tools, not just `start_build`. Replace the single `@function_tool` snippet with three. Add return-type contracts for each. Note that `web_search` is the only tool that does not hit the orchestrator.
-- [ ] **1.2** Update `docs/build-plan.md` Phase 4.1 — change "The agent has one tool: `start_build`" to "three tools: `start_build`, `modify_build`, `web_search`." Add the new sub-tasks 4.1a–4.1c referenced below to the Phase 4 task list.
-- [ ] **1.3** Update `docs/build-plan.md` Phase 4.7 — note that multi-turn refinement is now invoked via the `modify_build` tool (not implicit in `start_build` follow-ups).
-- [ ] **1.4** Add a short paragraph to `docs/voice-architecture.md` § "Why this topology" explaining that `web_search` is intentionally agent-side, not orchestrator-side, so search latency is bounded by Gemini's tool-call cycle and does not block codegen state writes.
+- [x] **1.1** Update `docs/voice-architecture.md` § "Tool-call contract (Phase 4 — locked)" to enumerate all four tools (`start_build`, `modify_build`, `stop_build`, `web_search`). Replace the single `@function_tool` snippet with four. Add return-type contracts for each. Note that `web_search` is the only tool that does not hit the orchestrator.
+- [x] **1.2** Update `docs/build-plan.md` Phase 4.1 — list the four tools (`start_build`, `modify_build`, `stop_build`, `web_search`).
+- [x] **1.3** Update `docs/build-plan.md` Phase 4.7 — multi-turn refinement is invoked via the `modify_build` tool (not implicit in `start_build` follow-ups).
+- [x] **1.4** Add a short paragraph to `docs/voice-architecture.md` § "Why this topology" explaining that `web_search` is intentionally agent-side, not orchestrator-side, so search latency is bounded by Gemini's tool-call cycle and does not block codegen state writes.
 
 ---
 
 ## §2 — Orchestrator code (Node.js, `apps/orchestrator/`)
 
-- [ ] **2.1** Confirm `POST /api/session` (Phase 4.3 wiring) accepts `{ intent: string }` and returns `{ sessionId: string }`. This is the `start_build` target. No new code if Phase 2.8 already shipped this.
-- [ ] **2.2** Add `POST /api/session/:id/modify` accepting `{ change: string }`. Implementation:
-  - Look up the persisted `cursor.Agent` handle for `:id` (extend `apps/orchestrator/src/cursor.ts` with an in-memory `Map<sessionId, Agent>`; on process restart this is lost — out of scope for hackathon).
-  - Call `agent.send({ message: change })` (per Cursor SDK docs).
-  - Push a Convex event `{ type: "MODIFY", payload: { change }, ts }`.
-  - Return `{ ok: true }` to the LiveKit Agent.
-- [ ] **2.3** **Do not** add a `web_search` endpoint to the orchestrator. The LiveKit Agent calls Exa directly.
+- [x] **2.1** Confirm `POST /api/session` (Phase 4.3 wiring) accepts `{ prompt: string, sessionId?: string }` and returns `{ sessionId: string }`. This is the legacy entry point (kept for the dev prompt bar). The voice path uses `/api/avatar/tool-call` instead — see 2.2.
+- [x] **2.2** All four build-lifecycle calls are routed through a single endpoint, `POST /api/avatar/tool-call`, instead of per-action paths. The orchestrator's `setOrchestratorHooks({ startBuild, modifyBuild, cancelBuild })` registers in-process hooks; the dispatcher in `apps/orchestrator/src/livekit.ts` switches on `body.name` (`start_build` | `modify_build` | `stop_build`) and calls the right hook. `modifyBuild` looks up the `agentId` cached in the per-session `agentBySession` Map (in `apps/orchestrator/src/index.ts`) and resumes the Cursor agent via `Agent.resume()`; `cancelBuild` calls `Run.cancel()` on the in-flight handle and tears the Daytona sandbox down. (The earlier `POST /api/session/:id/modify` plan is superseded by this unified shape.)
+- [x] **2.3** **Do not** add a `web_search` endpoint to the orchestrator. The LiveKit Agent calls Exa directly.
 
 ---
 
@@ -72,27 +68,29 @@ The orchestrator sees `start_build` and `modify_build`. It does **not** see `web
 
 The `services/livekit-agent/prompts/system_prompt.txt` file already exists. Everything else here is new.
 
-- [ ] **3.1** Scaffold `services/livekit-agent/` as a Python 3.11 package per `build-plan.md` Phase 3.2. Add `pyproject.toml` with deps: `livekit-agents`, `livekit-plugins-google`, `livekit-plugins-tavus`, `httpx`, `python-dotenv`. (We call Exa's REST API via `httpx` directly — no `exa-py` SDK dependency.)
-- [ ] **3.2** Create `services/livekit-agent/agent.py` that:
+- [x] **3.1** Scaffold `services/livekit-agent/` as a Python package per `build-plan.md` Phase 3.2. `pyproject.toml` declares `livekit-agents[google,tavus]`, `httpx`, `python-dotenv`. (We call Exa's REST API via `httpx` directly — no `exa-py` SDK dependency.)
+- [x] **3.2** `services/livekit-agent/src/nexus_agent/agent.py`:
   - Loads the system prompt from `prompts/system_prompt.txt`.
   - Constructs `AgentSession` with `livekit.plugins.google.beta.realtime.RealtimeModel(instructions=SYSTEM_PROMPT, voice=...)`.
   - Wraps with `tavus.AvatarSession(replica_id=os.getenv("TAVUS_REPLICA_ID"), persona_id=os.getenv("TAVUS_PERSONA_ID"))`.
-  - Registers the three `@function_tool` handlers (next three tasks).
-  - Subscribes to `agent_state_changed` and POSTs to `/api/session/:id/avatar-state` on the orchestrator.
-- [ ] **3.3** Implement `@function_tool start_build(self, context, intent: str) -> str`:
-  - HTTP POST to `${ORCHESTRATOR_URL}/api/session` with `{ intent }`.
-  - Store the returned `sessionId` in `context.room.metadata` so the frontend can pick it up.
-  - Return a short string acknowledgment for the model (e.g. `"build started"`).
-- [ ] **3.4** Implement `@function_tool modify_build(self, context, change: str) -> str`:
-  - Read `sessionId` from `context.room.metadata`. If missing, return `"no active build to modify — call start_build first"`.
-  - HTTP POST to `${ORCHESTRATOR_URL}/api/session/{sessionId}/modify` with `{ change }`.
-  - Return `"changes queued"`.
-- [ ] **3.5** Implement `@function_tool web_search(self, context, query: str) -> str`:
-  - Call Exa: `exa_client.search(query)` → POSTs to `https://api.exa.ai/answer` with `{ query, model: "exa" }` and `x-api-key` header. Returns synthesized answer + top citation as a single string.
-  - Format the top 5 results as plain text — title, URL, snippet — joined with newlines. Cap at ~1500 chars to keep Gemini's context lean.
+  - Registers four `@function_tool` handlers (start_build, modify_build, stop_build, web_search) plus the fal.ai pair.
+  - Subscribes to `agent_state_changed` and POSTs to `/api/avatar/state` on the orchestrator.
+- [x] **3.3** `@function_tool start_build(intent)`:
+  - HTTP POST to `${ORCHESTRATOR_URL}/api/avatar/tool-call` with `{ name: "start_build", args: { intent } }`.
+  - Stores the returned `sessionId` on `room.local_participant.attributes` (read by the frontend via `RoomEvent.ParticipantAttributesChanged`).
+  - Returns a short acknowledgment for the model (e.g. `"build started"`).
+- [x] **3.4** `@function_tool modify_build(change)`:
+  - Reads `sessionId` from agent state. If missing, returns `"no build to modify yet — call start_build first"`.
+  - HTTP POST to `${ORCHESTRATOR_URL}/api/avatar/tool-call` with `{ name: "modify_build", args: { change } }`.
+  - Returns `"changes queued"`.
+- [x] **3.4a** `@function_tool stop_build(reason)`:
+  - HTTP POST to `${ORCHESTRATOR_URL}/api/avatar/tool-call` with `{ name: "stop_build", args: { reason } }`.
+  - Returns `"build cancelled"`. Orchestrator-side `cancelBuild` aborts the Cursor Run, deletes the Daytona sandbox, and sets `endReason` on the Convex session row so `<FailureBanner>` renders the cancel state.
+- [x] **3.5** `@function_tool web_search(query)`:
+  - Call Exa via `exa_client.search(query)` → POST `https://api.exa.ai/answer` with `{ query, model: "exa" }` and `x-api-key` header. Returns a synthesized answer + top citation as a single string. Cap at ~1500 chars to keep Gemini's context lean.
   - Return that string (it goes back to Gemini as the tool result).
-- [ ] **3.6** Add `services/livekit-agent/.env.example` with: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GOOGLE_API_KEY`, `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `TAVUS_PERSONA_ID`, `EXA_API_KEY`, `ORCHESTRATOR_URL`. Document each in a comment.
-- [ ] **3.7** Add `services/livekit-agent/README.md` with the run command (`python -m agent dev`) and the env vars. One screen, no fluff.
+- [x] **3.6** `services/livekit-agent/.env.example` declares `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GOOGLE_API_KEY`, `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `TAVUS_PERSONA_ID`, `EXA_API_KEY`, `ORCHESTRATOR_URL`.
+- [x] **3.7** `services/livekit-agent/README.md` documents the run command (`nexus-agent dev`) and the env vars.
 
 ---
 

@@ -1,6 +1,6 @@
 # Nexus — 2 Minute Demo Script
 
-**Total runtime:** 2:00 · **VO word count:** ~290 · **Format:** [VISUAL] / VO
+**Total runtime:** ~2:15 · **VO word count:** ~370 · **Format:** [VISUAL] / VO
 
 ---
 
@@ -38,32 +38,43 @@
 
 ---
 
-## THE STACK — sponsor tech (1:20–1:45)
+## RESEARCH & EXPLAIN — Exa + fal.ai (1:20–1:45)
+
+**[VISUAL]** User: *"Should I use Zustand or Jotai for this?"* Avatar pauses for a beat, eyes flick. **Insights** tab shows a one-sentence synthesized answer with a single citation link.
+
+**[VISUAL]** User: *"Show me how the render cycle actually works."* The right panel snaps to the **Generate** tab. A queued spinner, then a clean illustrated diagram fades in — generated live by a fal.ai text-to-image model the avatar picked seconds ago.
+
+**VO:**
+> "Ask for advice — **Exa** searches the live web and gives the avatar a single synthesized answer. Current docs, current versions, no training-data drift. Ask it to *explain* a concept — the avatar searches **fal.ai**'s catalog, picks the right model for the job — image, video, audio, 3D, anything they host — generates the asset, and drops it into the panel. So I don't just hear the answer. I see it."
+
+---
+
+## THE STACK — sponsor tech (1:45–2:05)
 
 **[VISUAL]** Architecture diagram fades in. Components light up as named.
 
 **VO:**
-> "Under the hood: **Gemini 3.1 Flash Live** hears my voice and emits two streams on the same socket — audio for the avatar, structured tool calls for the orchestrator. The audio feeds **Tavus Phoenix-4** in BYO-LLM mode — lip-synced 1080p at 40 fps. The tool call hits our Node orchestrator, which spawns a **Cursor SDK** agent. The agent talks to **Daytona** over MCP — directly, cloud to cloud, our server isn't even in the data path. Every event streams through **Convex**; the UI re-renders reactively. No polling. No WebSocket plumbing. **LiveKit Agents** carries it all over WebRTC."
+> "Under the hood: **Gemini 3.1 Flash Live** emits audio and structured tool calls on the same socket. **Tavus Phoenix-4** lip-syncs the audio at 1080p, 40 fps. **Cursor SDK** against a **Daytona** sandbox writes the code over MCP — cloud to cloud, our server isn't even in the data path. **Convex** streams every event reactively. **Exa** for research. **fal.ai** for any model, any output. **LiveKit Agents** carries it all over WebRTC."
 
 ---
 
-## CLOSE — bring the thesis home (1:45–2:00)
+## CLOSE — bring the thesis home (2:05–2:15)
 
 **[VISUAL]** Slow push-in on the avatar. User asks softly: *"Hey — explain this useEffect to me."* Avatar smiles, starts talking. Code highlights line by line beside him.
 
 **VO:**
 > "Code creation is no longer the bottleneck. **Understanding** is. So we built the most natural interface for understanding — a face. **Nexus.** Software, spoken aloud."
 
-**[VISUAL]** Logo card. Sponsor logos in a tight strip: Gemini · Cursor · Daytona · Convex · Tavus · LiveKit.
+**[VISUAL]** Logo card. Sponsor logos in a tight strip: Gemini · Cursor · Daytona · Convex · Tavus · LiveKit · Exa · fal.ai.
 
 ---
 
 ## Production notes
 
 - **Pacing:** Code-streaming visuals can run faster than realtime — 2× the demo capture is fine. The voiceover sets the rhythm.
-- **The wow shots:** (1) sandbox spinning up under a stopwatch overlay, (2) Monaco diff streaming live, (3) the iframe popping in next to the avatar that's still talking, (4) the interruption with a 300 ms timer overlay.
+- **The wow shots:** (1) sandbox spinning up under a stopwatch overlay, (2) Monaco diff streaming live, (3) the iframe popping in next to the avatar that's still talking, (4) the interruption with a 300 ms timer overlay, (5) the fal.ai-generated diagram fading into the Generate tab while the avatar narrates.
 - **Audio:** Capture the avatar's actual Tavus voice for the demo lines — don't dub. The lip sync is the point.
-- **Cuttable for 60s:** drop the architecture section and the interruption beat; keep cold open + demo + close.
+- **Cuttable for 60s:** drop the architecture section, the interruption beat, and the Exa half of the research beat; keep cold open + build demo + fal.ai explain + close.
 
 ---
 
@@ -95,9 +106,10 @@
 | 1:15 | preview update | (no input) | Avatar: *"Try it — click a task."* | Iframe auto-refreshes (key change on previewUrl); confetti fires on click. |
 | 1:30 | utt 3 — interrupt | Say: **"Stop. Actually, build me a snake game instead."** (cut in mid-narration) | Avatar audio cuts within 300 ms. Then: *"Switching gears — building the snake game now."* | Tool call: agent classifies as new build → `start_build("snake game")`. Orchestrator cancels the old Cursor Run; a fresh sandbox spins up. |
 | 2:00 | snake renders | (no input) | Avatar: *"Snake's ready — use arrow keys."* | Live Preview tab shows the snake game. |
-| 2:30 | utt 4 — research | Say: **"What's the latest Next.js version?"** | Avatar: *(brief pause)* *"Looks like 15.1 just shipped — want me to upgrade?"* | Tool call: `web_search("latest Next.js version")` → Exa `/answer`. **No** orchestrator call. |
-| 2:50 | export | Click **Export Code** in the top-right. | (no audio) | Browser downloads `nexus-<sessionId>.zip`. |
-| 3:00 | end | Say: **"Thanks, that's all."** | Avatar: *"Anytime."* | End-call button tears down the room. |
+| 2:30 | utt 4 — research | Say: **"What's the latest Next.js version?"** | Avatar: *(brief pause)* *"Looks like 15.1 just shipped — want me to upgrade?"* | Tool call: `web_search("latest Next.js version")` → Exa `/answer`. **No** orchestrator call; Exa returns a synthesized one-paragraph answer + top citation, which Gemini paraphrases. |
+| 2:45 | utt 5 — explain | Say: **"Show me how the snake's render loop works."** | Avatar: *"Pulling up a quick diagram now."* (narrates while the asset generates) | Tool calls: `list_fal_models(category="text-to-image", query="diagram")` → `run_fal_model(endpoint_id, prompt)`. Convex `falJobs` row goes queued → in_progress → completed; **Generate** tab fades in with the rendered image. |
+| 3:05 | export | Click **Export Code** in the top-right. | (no audio) | Browser downloads `nexus-<sessionId>.zip`. |
+| 3:15 | end | Say: **"Thanks, that's all."** | Avatar: *"Anytime."* | End-call button tears down the room. |
 
 ### What "no dead air >5s" means here
 
@@ -114,7 +126,7 @@ Between t=0:08 and t=0:35 the Cursor agent is mid-codegen. The narration channel
 
 ### How to time the demo for the deck
 
-The marketing script (top of file) is meant to play **over** the live operational demo. The operational columns above clock at ~3:00; tighten to 2:00 by skipping utt 3 (interruption demo) and utt 4 (web_search) — both can be teased in the narrator's voiceover instead.
+The marketing script (top of file) is meant to play **over** the live operational demo. The operational columns above clock at ~3:15; tighten to 2:00 by skipping utt 3 (interruption), utt 4 (Exa research), and the export step — keep utt 1 (build), utt 2 (modify), and utt 5 (fal.ai explain), since the explain beat is the cleanest payoff for the thesis.
 
 ### Re-run protocol (when keys are missing)
 

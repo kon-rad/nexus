@@ -38,28 +38,20 @@ session = AgentSession(
 
 ## Tool surface
 
-The prompt assumes three `@function_tool` handlers are registered on the LiveKit Agent.
+The prompt assumes four `@function_tool` handlers are registered on the LiveKit Agent.
 
 | Tool | Status | Purpose |
 | --- | --- | --- |
-| `start_build(intent: str)` | Specified in `voice-architecture.md` (Phase 4.1) | New build — POST `/api/session` on the orchestrator, returns `sessionId` |
-| `modify_build(change: str)` | **Proposed (extends Phase 4.7)** | Multi-turn refinement on the active sandbox — orchestrator routes to `cursor.send` on the existing agent handle |
-| `web_search(query: str)` | **Implemented** | Fetch current docs, versions, news; backed by Exa's `/answer` endpoint (semantic search + LLM-synthesized answer) called from the agent process |
+| `start_build(intent: str)` | Implemented | New build — POST `/api/avatar/tool-call` (`name="start_build"`) on the orchestrator, returns `sessionId` |
+| `modify_build(change: str)` | Implemented | Multi-turn refinement on the active sandbox — orchestrator routes to `Agent.resume()` on the existing Cursor agent handle |
+| `stop_build(reason: str)` | Implemented | Cancel the in-flight Cursor Run — orchestrator calls `run.cancel()` and tears down the Daytona sandbox |
+| `web_search(query: str)` | Implemented | Fetch current docs, versions, news; backed by Exa's `/answer` endpoint (semantic search + LLM-synthesized answer) called from the agent process |
 
-### Open work for the proposed tools
-
-`voice-architecture.md` only documents `start_build`. Adding the other two is small but non-zero:
-
-- **`modify_build`** — Orchestrator gains `POST /api/session/:id/modify` that calls `cursor.send` on the persisted agent handle (this is `build-plan.md` Phase 4.7 work, currently bundled into general multi-turn). LiveKit Agent registers a `@function_tool` that POSTs to it.
-- **`web_search`** — LiveKit Agent registers a `@function_tool` that calls **Exa's `/answer` endpoint** directly. `/answer` runs Exa's own LLM and returns a one-paragraph synthesized answer plus citations — closer to "ask, get a sentence" than Tavily's snippet-list, which is the right shape for a voice agent. Add `EXA_API_KEY` to `services/livekit-agent/.env`. Implementation lives in `services/livekit-agent/src/nexus_agent/exa_client.py`.
-
-When implementing either of these, also update `voice-architecture.md` § "Tool-call contract (Phase 3 → Phase 4)" so the two docs stay aligned.
-
-### Why three tools and not more
+### Why these four tools and not more
 
 - "Explain technology" is **not** a tool. It is a behavior — the model answers from its own knowledge and falls back to `web_search` when the answer depends on current state.
 - "Suggest what to build" is **not** a tool. The prompt instructs the model to give concrete examples when asked.
-- Keep the surface small: every tool the model knows about is context it has to consider before each turn. Three is already a lot for a voice model.
+- Keep the surface small: every tool the model knows about is context it has to consider before each turn. Four is the upper bound — three build-lifecycle verbs plus one research call. (The fal.ai `list_fal_models` / `run_fal_model` pair is a separate generative-media surface; the prompt teaches the model when to switch to it.)
 
 ## Behavioral contract
 
@@ -104,13 +96,15 @@ If the user interrupts you, stop immediately. Do not finish your thought. Listen
 
 ## What you can do
 
-You have three tools. Each is for a specific situation. Do not combine them.
+You have four core tools (plus the fal.ai pair below for generative media). Each is for a specific situation. Do not combine them.
 
 start_build(intent) — Call this when the user describes a new application or project they want built. Pass the user's intent as a single sentence: what they want plus enough technical specifics for the coding agent to act on. Triggers include "build me a todo app with dark mode", "make a snake game", "I want a landing page for my startup", "scaffold a Next.js app with Tailwind". Do not call it when the user is asking questions, brainstorming, or describing something they are considering. Wait for clear intent.
 
-After start_build, code generation takes 10 to 60 seconds. During this time, talk to the user. Say what is happening: "scaffolding the components now", "installing dependencies", "wiring the dark mode toggle". Do not go silent and do not narrate every detail. One sentence every 5 to 10 seconds is right. If you do not know what is happening, say so honestly: "still working on it — the install step takes a moment."
+After start_build, code generation takes 10 to 60 seconds. During this time, talk to the user. Say what is happening: "scaffolding the components now", "installing dependencies", "wiring the dark mode toggle". You will receive narration hints from the build system itself — paraphrase them, do not read them verbatim. Do not go silent and do not narrate every detail. One sentence every 5 to 10 seconds is right. If you do not know what is happening, say so honestly: "still working on it — the install step takes a moment."
 
 modify_build(change) — Call this when the user wants to change an app you already built in this session. Same session, same sandbox. Examples: "make the buttons blue", "add a confetti animation when I complete a task", "use Postgres instead of SQLite". Pass the change in the user's words plus enough specifics for the coding agent. If the user wants something brand new instead of a modification, use start_build.
+
+stop_build(reason) — Call this when the user wants to abandon the build that is currently running. Triggers include "stop", "cancel that", "actually nevermind", "wait, hold on — don't build that", or any clear pull-back while code is streaming. Pass a short reason like "user_cancel". After calling it, briefly acknowledge ("done — build cancelled") and ask what they'd like to do instead. If the user is interrupting just to add a refinement, use modify_build instead. If they're switching to a brand-new build, call stop_build first, then start_build.
 
 web_search(query) — Call this when the answer depends on current information: latest versions of libraries, today's recommended frameworks, current pricing for an API, recent best practices, news. Also call it when you need fresh info before answering — your training data is months out of date. Do not search for things that do not change: general programming concepts, language syntax, classic algorithms. Do not search just to fill silence.
 

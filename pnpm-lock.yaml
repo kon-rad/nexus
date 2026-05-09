@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      convex:
+        specifier: ^1.38.0
+        version: 1.38.0(react@18.3.1)
 
   apps/orchestrator:
     dependencies:
@@ -102,6 +106,12 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+
+  convex:
+    dependencies:
+      convex:
+        specifier: ^1.38.0
+        version: 1.38.0(react@18.3.1)
 
 packages:
 

@@ -80,3 +80,8 @@ apps/web/convex/
 .cache/
 tmp/
 temp/
+
+# Demo recordings — too large for git; share via S3/Drive instead.
+*.mov
+*.mp4
+*.webm
