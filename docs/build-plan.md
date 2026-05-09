@@ -1,0 +1,340 @@
+# Nexus — 5-Phase Incremental Build Plan
+
+> **For future agents.** This is the operational playbook for building Nexus from empty repo to demo-ready app. Each phase ships an independently demoable artifact, has explicit verification criteria, and references the specific source-of-truth docs you should re-read before starting work in that phase.
+>
+> **Source of truth, by topic:**
+> - System diagram & prize targets — `docs/architecture.md`
+> - Cursor SDK + Daytona + DigitalOcean deployment — `docs/coding-agent-architecture.md`
+> - Visual design system, layout, copy — `docs/design-prompt.md`
+> - Working React reference for landing/workspace/profile — `docs/design/nexus/src/*.jsx` and `styles.css`
+> - Open architectural risks — `docs/questions.md`
+>
+> **How to use this file:** Pick the lowest unfinished phase. Read its **Re-read first** section. Work the **Tasks** in order. Before marking a checkbox done, run the **Verification** for that task. A phase is only "complete" when every box in the **Phase Verification** section passes — not when the tasks merely exist in code.
+>
+> **Marking convention:** `[ ]` not started · `[~]` in progress · `[x]` done and verified.
+
+---
+
+## Repo Layout (target)
+
+This is the layout we are building toward. It matches `coding-agent-architecture.md` §7. Every phase adds to it; no phase invents new top-level directories without a note in this plan.
+
+```
+nexus/
+├─ apps/
+│  ├─ web/                # Next.js 14 (App Router) frontend
+│  │  └─ app/
+│  │     ├─ (landing)/    # marketing page
+│  │     ├─ workspace/    # main product (split-pane)
+│  │     └─ profile/      # settings page
+│  └─ orchestrator/       # Node.js backend (Cursor SDK + Daytona + Convex pusher)
+│     ├─ cursor.ts
+│     ├─ daytona.ts
+│     ├─ gemini-router.ts
+│     └─ convex-pusher.ts
+├─ services/
+│  └─ livekit-agent/      # Python LiveKit Agents worker → Gemini Live + Tavus BYO
+├─ convex/                # Convex schema + mutations + queries
+├─ infra/
+│  ├─ Caddyfile
+│  ├─ ecosystem.config.js # PM2
+│  └─ deploy.sh
+├─ docs/                  # the docs you're reading
+└─ package.json           # pnpm workspace root
+```
+
+---
+
+## Cross-Cutting Conventions
+
+These apply to every phase. Don't re-decide them per phase.
+
+- **Package manager:** pnpm workspaces. Single lockfile at root.
+- **Node:** 20 LTS. **Python:** 3.11 (LiveKit agent only).
+- **Frontend stack:** Next.js 14 App Router, React 18, TypeScript strict, Tailwind CSS for utility, CSS variables for tokens (mirror `docs/design/nexus/src/styles.css`).
+- **Design tokens:** never hard-code hex. Use `--bg-canvas`, `--bg-surface`, `--bg-elevated`, `--border-subtle`, `--accent-cyan`, `--accent-purple`, `--text-primary`, `--text-secondary`, `--text-danger` per `design-prompt.md` §1.
+- **Fonts:** Inter (UI) + JetBrains Mono (code). Loaded via `next/font` on the web app.
+- **Secrets:** never in `apps/web/`. All API keys live in the orchestrator's env (`/etc/nexus.env` in prod; `.env.local` in dev). The browser may only see `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_LIVEKIT_URL`.
+- **Realtime contract:** the frontend never RPCs the orchestrator for agent state. All agent state flows orchestrator → Convex → frontend `useQuery`.
+- **Commits per phase:** small, atomic, conventional commits. Each task in this plan is roughly one commit.
+
+---
+
+## Phase 1 — Foundation & Static UI Shell
+
+**Goal:** A runnable Next.js app that renders all three pages (Landing, Workspace, Profile) with mock data, matching the visual design exactly. No backend, no realtime, no APIs. **A judge could click around it like a Figma prototype.**
+
+**Owners:** Frontend pair. Backend pair can start Phase 2 scaffolding in parallel (Convex deploy, env wiring) — they just can't render anything yet.
+
+**Re-read first:** `docs/design-prompt.md` (the whole thing), `docs/design/nexus/src/styles.css` (token names and values), `docs/design/nexus/src/{landing,workspace,profile}.jsx` (your visual reference).
+
+### Tasks
+
+- [x] **1.1** Initialize pnpm workspace at repo root with `apps/web` and `apps/orchestrator` packages. Root `package.json` defines workspaces; both packages compile under `tsc --noEmit`.
+- [x] **1.2** Bootstrap `apps/web` as Next.js 14 App Router + TypeScript strict + Tailwind. Configure `next/font` for Inter and JetBrains Mono.
+- [x] **1.3** Create `apps/web/app/globals.css` with the full token set from `design-prompt.md` §1 (colors, fonts, glassmorphism mixin). Mirror the variable names in `docs/design/nexus/src/styles.css`.
+- [ ] **1.4** Build a shared component library in `apps/web/components/`:
+  - `PrimaryButton`, `GhostButton` (pill, cyan glow on hover)
+  - `GlassPill` (rgba(18,18,18,0.7) + blur(12px) + border-subtle)
+  - `StatusBadge` (8px circle, green/purple/cyan, pulse animation)
+  - `TabBar` (flat, 2px cyan bottom border on active)
+  - `ProfileAvatar` (40px circle, cyan ring on hover, initials fallback)
+- [ ] **1.5** Build the **Landing page** at `app/(landing)/page.tsx`. Sections in order:
+  1. Hero — "Your AI Co-Founder is Online." with cyan→purple gradient on "Online", subhead, primary CTA "Start Building — Free", ghost CTA "Watch Demo", and a 3D-tilted mockup of the workspace on the right (use `HeroWorkspaceMock` from `landing.jsx` as your reference).
+  2. Sponsor strip — monochrome logos for Gemini Live, Tavus Phoenix-4, Cursor SDK, Daytona, Convex.
+  3. 3-feature grid — Real-Time Voice, Secure Code Execution, Instant Live Preview.
+  4. Final CTA section — full-width, repeats primary button.
+- [ ] **1.6** Build the **Workspace page** shell at `app/workspace/page.tsx`. Two-column split with draggable resize handle (default 30/70). Top nav bar spans the right panel only.
+  - Left panel: placeholder `<div>` with a static avatar still-frame and the bottom glassmorphic mic-pill (mute toggle, end-call, fake waveform of static bars). Status badge at top-left.
+  - Right panel: tabbed interface with **Live Preview**, **Code Inspection**, **Insights** tabs. Action buttons (Export, Settings, User avatar) at top-right.
+- [ ] **1.7** Build static **Live Preview tab** with the fake browser-shell chrome (3 dots, lock icon, URL `preview-7f3a-ax21.daytona.dev`, Copy URL button). Iframe stub points at `about:blank`.
+- [ ] **1.8** Build static **Code Inspection tab** with the file-tree sidebar (mirror `FILE_TREE` from `workspace.jsx`) and a Monaco editor showing one hard-coded TypeScript file. Streaming animation can be a CSS-only blinking cursor for now.
+- [ ] **1.9** Build static **Insights tab** with markdown explanation in the top half and a static xterm-styled `<pre>` in the bottom half (no real xterm.js yet).
+- [ ] **1.10** Build the **Profile page** at `app/profile/page.tsx`. Centered 800px container. Three sections (Account, Integrations, Preferences) separated by `--border-subtle` dividers. Danger Zone at the bottom with muted-red Delete Account button.
+- [ ] **1.11** Wire client-side route navigation: Landing CTA → Workspace; Workspace user-avatar → Profile; Profile back arrow → Workspace.
+
+### Deliverables
+
+- A `pnpm dev` command that boots the Next.js app at `http://localhost:3000`.
+- All three pages reachable, visually matching the design files within ~5% pixel fidelity.
+- Zero TypeScript errors, zero console errors in browser.
+
+### Phase 1 Verification (must all pass before Phase 2)
+
+- [ ] `pnpm install && pnpm --filter web dev` boots cleanly, no warnings.
+- [ ] `pnpm --filter web typecheck` passes (no `tsc` errors).
+- [ ] `pnpm --filter web build` succeeds (production build works, not just dev).
+- [ ] Side-by-side visual comparison: open `docs/design/nexus/Nexus.html` in one tab, your `localhost:3000` in another. Landing, Workspace, and Profile look like the same product. Spacing, color, type weight, glassmorphism all match.
+- [ ] All design tokens from `design-prompt.md` §1 exist as CSS variables in `globals.css` and are used (no raw hex values in components — verify with `grep -r "#[0-9a-fA-F]\{6\}" apps/web/components apps/web/app`).
+- [ ] Mobile breakpoint (≤768px) renders without horizontal scroll on Landing. (Workspace and Profile may be desktop-only — that's acceptable, but document it.)
+- [ ] No accessibility lint errors (`pnpm --filter web lint`).
+- [ ] **Demo check:** record a 30-second screen capture clicking through Landing → Workspace → Profile → back. Send to a teammate. They should believe it's a finished product (until they try to talk to it).
+
+---
+
+## Phase 2 — Code Generation Pipeline (Text-Only)
+
+**Goal:** Type a prompt into a textarea on the workspace page, watch the right panel come alive: code streams in real time, terminal logs appear, and a real Daytona preview URL renders in the iframe. **Voice and avatar are not in this phase.** This proves the Cursor SDK ↔ Daytona ↔ Convex axis end-to-end.
+
+**Owners:** Backend pair drives, frontend pair wires Convex subscriptions to the Phase 1 panels.
+
+**Re-read first:** `docs/coding-agent-architecture.md` §1–3 (the three planes, where Cursor runs, the t=0 → t=14.5s sequence). `docs/questions.md` Q4 (multi-turn sandbox state), Q6 (iframe embedding), Q8 (source of truth).
+
+### Tasks
+
+- [ ] **2.1** Set up Convex: `npx convex dev` in `convex/` to create a deployment. Add `NEXT_PUBLIC_CONVEX_URL` to `apps/web/.env.local` and `CONVEX_DEPLOY_KEY` to `apps/orchestrator/.env`.
+- [ ] **2.2** Define Convex schema in `convex/schema.ts` with these tables (matches the State table in `coding-agent-architecture.md` §3):
+  - `sessions` — `{ _id, userId?, createdAt, sandboxId?, previewUrl?, state }`
+  - `events` — `{ sessionId, type, payload, ts }` (THINKING / CODING / RUNNING / PREVIEW / CHAT)
+  - `files` — `{ sessionId, path, content, lastWrittenAt }` (latest snapshot per file)
+  - `logs` — `{ sessionId, stream: "stdout"|"stderr", line, ts }`
+  - `sandbox` — `{ sessionId, daytonaId, mcpUrl, mcpToken, previewUrl, status }`
+- [ ] **2.3** Write Convex mutations: `events.push`, `files.upsert`, `logs.append`, `sandbox.update`. And queries: `events.bySession`, `files.bySession`, `logs.bySession`, `sandbox.bySession`.
+- [ ] **2.4** Bootstrap `apps/orchestrator` as a Node.js TypeScript service (Express or Fastify, your choice — Fastify recommended). Add `@cursor/sdk`, `@daytonaio/sdk`, `convex` deps.
+- [ ] **2.5** Implement `apps/orchestrator/daytona.ts`: `createSandbox()` returns `{ sandboxId, mcpUrl, mcpToken, getPreviewUrl(port) }`. Verify a 90ms-ish cold-start with the SDK.
+- [ ] **2.6** Implement `apps/orchestrator/cursor.ts`: `runAgent({ prompt, sandbox, sessionId })` opens a Cursor agent with the Daytona MCP server attached, iterates the event stream, and forwards each event to Convex via the pusher (next task). Mirror the snippet in `coding-agent-architecture.md` §2.
+- [ ] **2.7** Implement `apps/orchestrator/convex-pusher.ts`: a thin wrapper that maps Cursor SDK event types (`assistant_delta`, `tool_call`, `tool_result`, `status`) to Convex mutations. Includes the file-write extractor (when the agent calls `fs.writeFile`, push to `files.upsert` with the new contents).
+- [ ] **2.8** Add a single HTTP endpoint to the orchestrator: `POST /api/session` `{ prompt: string }` → creates session row in Convex, spins Daytona sandbox, kicks off Cursor agent, returns `{ sessionId }`. Streaming happens out-of-band via Convex.
+- [ ] **2.9** **Frontend:** add a temporary "DEV PROMPT BAR" at the top of the workspace right panel (gated behind `NEXT_PUBLIC_DEV_PROMPT_BAR=1`). On submit, calls `POST /api/session` and stores `sessionId` in URL state.
+- [ ] **2.10** **Frontend:** wire the **Code Inspection tab** to `useQuery(api.files.bySession)`. The active file is the latest-written one; the editor body re-renders on each Convex update. Replace the static `CODE_LINES` from Phase 1 with real content.
+- [ ] **2.11** **Frontend:** wire the **Insights tab** terminal half to `useQuery(api.logs.bySession)` with auto-scroll and color-coding for `stdout` (green `#00FF41`) vs `stderr` (red `#FF4444`). Use a real `xterm.js` instance now, not a `<pre>` mock.
+- [ ] **2.12** **Frontend:** wire the **Live Preview tab** iframe to `useQuery(api.sandbox.bySession).previewUrl`. The fake URL bar shows the actual signed URL.
+- [ ] **2.13** **Frontend:** wire the **Insights tab** explanation half to the latest `assistant_delta` text from `events.bySession`, rendered through `react-markdown`.
+- [ ] **2.14** **Resolve `questions.md` Q6 — iframe embedding.** Test a real Daytona preview URL inside the iframe. If it ships `X-Frame-Options: DENY`, add a Caddy/Next.js middleware proxy that strips the header. Document the result in `docs/iframe-decision.md` (one paragraph).
+- [ ] **2.15** **Multi-turn:** send a follow-up prompt and confirm the Cursor agent reuses the same sandbox and continues the session. If it doesn't, fix it now (this is the difference between a demo and a toy — `questions.md` Q4).
+
+### Deliverables
+
+- Typing "build a todo app with dark mode" into the dev prompt bar produces, within ~30s, streaming code in Code Inspection, npm install logs in the terminal, and a working app in Live Preview.
+- A second prompt ("make the buttons blue") modifies the same app without losing state.
+
+### Phase 2 Verification
+
+- [ ] `POST /api/session` with prompt "build a hello world Express server on port 3000" returns a 200 with `{ sessionId }` in <500ms (Daytona spin-up + Cursor agent.create).
+- [ ] Convex `events` table receives at least: 1 `THINKING`, 1+ `CODING`, 1 `RUNNING`, 1 `PREVIEW` for that session, in that order.
+- [ ] The `previewUrl` returned by Daytona, opened in a new browser tab, shows "Hello World".
+- [ ] The same `previewUrl` rendered inside the workspace's `<iframe>` shows "Hello World" (or, with documented proxy, shows it through the proxy).
+- [ ] Code Inspection tab shows ≥1 file with real generated content; the file tree updates as new files are written.
+- [ ] Insights tab terminal shows real `npm install` output, with stderr color-coded if present.
+- [ ] Multi-turn: a second prompt "add a /health endpoint that returns OK" updates the same sandbox; visiting `<previewUrl>/health` returns OK.
+- [ ] No Cursor or Daytona API keys are reachable from the browser (`grep -r "process.env.CURSOR_API_KEY" apps/web` returns zero matches).
+- [ ] Resilience: kill the orchestrator mid-session, restart it. The frontend keeps showing the last-known state from Convex without crashing (it just won't get new events).
+
+---
+
+## Phase 3 — Voice & Avatar Layer
+
+**Goal:** Replace the Phase 1 placeholder avatar with the real Tavus Phoenix-4 video feed, and wire bidirectional audio through LiveKit + Gemini Live. **The user can talk to the AI and see/hear it respond.** Code generation from Phase 2 is still triggered by the dev prompt bar; voice → code wiring is Phase 4.
+
+**Owners:** A dedicated voice/media pair. Frontend supports.
+
+**Re-read first:** `docs/architecture.md` §1–3 (Gemini, Tavus, LiveKit). `docs/coding-agent-architecture.md` §4 (LiveKit deployment notes — UDP ports). `docs/questions.md` Q1, Q2, Q5 — these are the hardest unresolved risks and you must lock down answers before writing code.
+
+### Tasks
+
+- [ ] **3.0 (BLOCKING)** **Resolve `questions.md` Q1.** Decide and document in `docs/voice-architecture.md`: are we (a) running Gemini Live as Tavus's BYO LLM and *also* running a separate Gemini intent extractor, or (b) running one Gemini Live and using Gemini's tool-call mechanism to fork conversational audio (→ Tavus) from intent (→ orchestrator)? **Until this is decided, do not write LiveKit code.** Recommendation: pattern (b), single Gemini, tool calls extracted by the LiveKit agent and forwarded over HTTP to the orchestrator.
+- [ ] **3.1** Stand up a LiveKit server. Local dev: `docker run livekit/livekit-server --dev`. Add `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `NEXT_PUBLIC_LIVEKIT_URL` to env.
+- [ ] **3.2** Create `services/livekit-agent/` as a Python package (LiveKit Agents framework). Worker connects to the LiveKit server, joins rooms on demand, and registers a Gemini Live session per room.
+- [ ] **3.3** Configure the LiveKit agent with the Tavus avatar plugin (BYO mode). Audio output from Gemini Live routes into the Tavus pipeline; Tavus emits a video track back into the room.
+- [ ] **3.4** Add a backend endpoint `POST /api/livekit/token` `{ sessionId }` → returns a short-lived LiveKit JWT for the browser. Token grants subscribe to the avatar's video track and publish the user's mic.
+- [ ] **3.5** **Frontend:** install `livekit-client`. On workspace mount, fetch the token and connect to the room. Render the Tavus video track in the **left panel** (replacing the Phase 1 placeholder).
+- [ ] **3.6** **Frontend:** wire the mic mute toggle, end-call button, and audio waveform visualizer in the bottom glassmorphic pill. Waveform reads from `MediaStreamAudioSourceNode` via Web Audio API.
+- [ ] **3.7** **Frontend:** wire the top-left **StatusBadge** to live state from the LiveKit agent (Listening / Thinking / Speaking). Use a Convex `avatarState` field on the session row; the LiveKit agent updates it.
+- [ ] **3.8** **Frontend:** apply the radial-gradient glow behind the avatar that matches the active state (cyan = listening, purple = thinking, white = speaking) per `design-prompt.md` §3.
+- [ ] **3.9** **Resolve `questions.md` Q2 — latency budget.** Measure each hop: mic → LiveKit ingress → Gemini → Tavus → LiveKit egress → user video. Record per-hop ms in `docs/latency-budget.md`. Target user-finishes-sentence-to-avatar-reacts < 1.5s.
+- [ ] **3.10** **Resolve `questions.md` Q5 — interruption.** If the user interrupts while the avatar is speaking, Gemini Live cancels its TTS stream. Verify Tavus respects the cancel (no zombie lip-sync). Document behavior.
+
+### Deliverables
+
+- The user opens `/workspace`, sees the avatar's face, says "Hello", and the avatar visibly listens, thinks, and speaks back. End-to-end voice round trip.
+- The status badge changes color in real time. The waveform reacts to user speech.
+
+### Phase 3 Verification
+
+- [ ] LiveKit room joins succeed within 1s of page load (verified in browser devtools network panel).
+- [ ] User speaks; agent's `state` transitions Listening → Thinking → Speaking → Listening within a single utterance round-trip.
+- [ ] Avatar's lips visibly move in sync with audio (Tavus delivering on its spec).
+- [ ] Interruption test: user starts a sentence, then 1s later says "stop". Avatar's audio cuts within 300ms.
+- [ ] Mic mute button: when muted, waveform flatlines and Gemini receives no audio (verified in agent logs).
+- [ ] End-call button: closes the LiveKit room, transitions UI back to a "Start session" state, and tears down the Gemini Live session (no leaked minutes).
+- [ ] `docs/voice-architecture.md` exists and describes the chosen Gemini-Tavus topology in <300 words.
+- [ ] `docs/latency-budget.md` exists with per-hop ms measurements.
+- [ ] **Smoke test under load:** two simultaneous sessions in two browser tabs both work without audio dropouts on a single dev machine.
+
+---
+
+## Phase 4 — End-to-End Orchestration
+
+**Goal:** Remove the dev prompt bar. The user's *voice* is now the only input. Speaking "build a todo app with dark mode" triggers the full Cursor → Daytona → Convex pipeline, and the avatar narrates while it works. **This is the demo flow.**
+
+**Owners:** Whole team. This is the integration phase.
+
+**Re-read first:** `docs/architecture.md` §"End-to-End Workflow". `docs/questions.md` Q3 (dead-air problem), Q5 (interruption mid-codegen), Q7 (failure modes), Q10 (canonical demo script).
+
+### Tasks
+
+- [ ] **4.1** Define the Gemini Live tool schema. The agent has one tool: `start_build({ intent: string })`. When Gemini calls it, the LiveKit agent posts to the orchestrator's `POST /api/session` endpoint. Document the tool schema in `docs/voice-architecture.md`.
+- [ ] **4.2** Update Gemini's system prompt: it is a coding pair-programmer that uses `start_build` whenever the user describes something to build, and otherwise just chats. Iterate this prompt until it doesn't over- or under-trigger.
+- [ ] **4.3** Wire the tool-call handler in the LiveKit agent to forward to the orchestrator. The orchestrator returns `{ sessionId }`; the agent stores it in the room metadata so the frontend can read it.
+- [ ] **4.4** **Frontend:** subscribe to `room.metadata.sessionId` and use it as the Convex session selector. Remove the dev prompt bar (or hide it behind a flag).
+- [ ] **4.5** **Resolve `questions.md` Q3 — narration during codegen.** Implement avatar narration: when a Cursor `assistant_delta` event lands, the orchestrator forwards the text fragment to the LiveKit agent over a side channel (data channel or HTTP), which feeds it to Gemini Live as a synthetic assistant message. Result: avatar speaks aloud what the agent is "thinking." Cap to <2 sentences per minute to avoid overwhelming the user.
+- [ ] **4.6** **Resolve `questions.md` Q5 — interruption mid-codegen.** Decide and implement: if the user starts speaking while Cursor is mid-generation, do we (a) finish silently and respond to the new request after, (b) cancel the agent and restart with new intent, or (c) queue the new intent? Recommendation: (a) for "be quiet" / "keep going" classes; (b) only when intent is a new build. Wire Gemini's intent classifier accordingly.
+- [ ] **4.7** **Multi-turn refinement:** "make the buttons blue" → same sandbox, same agent context, diff streams to Code Inspection, preview iframe auto-refreshes if needed. Confirm Cursor `agent.send()` accepts follow-ups on the same agent handle.
+- [ ] **4.8** **Resolve `questions.md` Q7 — failure modes.** Build a one-page table in `docs/failure-modes.md` mapping each external service failure to user-visible behavior:
+  - Daytona timeout → avatar says "the sandbox is taking longer than usual…", retries once, then gracefully apologizes
+  - Cursor API 5xx → avatar acknowledges, suggests rephrasing
+  - Tavus offline → fall back to audio-only, log warning
+  - Gemini Live drops → reconnect; show a "Reconnecting…" toast in the UI
+  - Convex disconnect → frontend shows a stale-data banner; orchestrator buffers events for replay on reconnect
+- [ ] **4.9** Build the export-code flow. Action button "Export Code" calls `daytona.downloadWorkspace(sandboxId)` (or equivalent), streams a ZIP back to the browser, prompts download.
+- [ ] **4.10** Build the **Settings modal**. Avatar voice picker (Gemini voice IDs), terminal font size, thinking-glow toggle. Persist to localStorage; for logged-in users (later) sync to a Convex `userSettings` table.
+- [ ] **4.11** Wire the **Profile page** to real session history (Convex query `sessions.byUser`). Show count of minutes used, sandboxes created, exports — even if minutes is a stubbed sum for now.
+
+### Deliverables
+
+- A user opens the app, clicks "Start Building", and never types again. They speak; the app builds. They speak again; it iterates.
+
+### Phase 4 Verification
+
+- [ ] **The 3-minute demo script** (`docs/demo-script.md`) plays through end-to-end without intervention:
+  - 0:00 — User: "Hi Nexus, build me a todo app with dark mode."
+  - 0:05 — Avatar: "On it — spinning up your sandbox now…"
+  - 0:08 — Code Inspection: files start appearing.
+  - 0:30 — Live Preview: working todo app loads.
+  - 1:00 — User: "Add a confetti animation when I complete a task."
+  - 1:30 — Live Preview auto-updates with the new behavior.
+  - 2:00 — User clicks Export, gets a ZIP.
+- [ ] No dead air >5s during code generation (narration kicks in).
+- [ ] Interruption test: user says "build X", then 5s later says "actually, build Y instead." Old agent is canceled, new one starts. Old sandbox is either cleaned up or repurposed; no orphans.
+- [ ] `docs/failure-modes.md` exists with all six services × failure-mode entries.
+- [ ] Export flow produces a ZIP that, when extracted and run locally (`npm install && npm run dev`), produces the same app the iframe shows.
+- [ ] Settings persist across page reloads.
+- [ ] **End-to-end run cost** is measured: minutes of Tavus, Gemini, Cursor calls, Daytona compute used per demo. Logged to `docs/cost-per-run.md`. (`questions.md` Q9.)
+
+---
+
+## Phase 5 — Deploy, Polish & Demo Hardening
+
+**Goal:** Move from "works on localhost" to "demoable from a single URL on stage." Production deploy on DigitalOcean, network resilience, fallback paths, demo rehearsal.
+
+**Owners:** Whole team — but a dedicated infra owner runs §5.1–5.6.
+
+**Re-read first:** `docs/coding-agent-architecture.md` §4–5 (DigitalOcean deployment, Caddyfile, PM2). `docs/questions.md` Q7, Q9, Q10.
+
+### Tasks
+
+- [ ] **5.1** Provision the production Droplet per `coding-agent-architecture.md` §5: `s-2vcpu-4gb`, Ubuntu 24.04, NYC3 (or closest to demo location).
+- [ ] **5.2** Open required firewall ports: 80/tcp, 443/tcp, 7881/tcp, 50000-60000/udp. Restrict 22/tcp to the team's IPs.
+- [ ] **5.3** Install Node 20, Caddy, Docker, PM2. Clone the repo to `/opt/nexus`. Run `pnpm install && pnpm build`.
+- [ ] **5.4** Configure `/etc/nexus.env` with all production keys. Verify the orchestrator and LiveKit agent can read them via PM2's `--env-file` (or systemd EnvironmentFile).
+- [ ] **5.5** Bring up LiveKit server in Docker per the snippet in `coding-agent-architecture.md` §5. Bring up the orchestrator, the LiveKit agent, and the Next.js production server under PM2 (`infra/ecosystem.config.js`).
+- [ ] **5.6** Configure Caddy with the three subdomains (`nexus`, `api.nexus`, `livekit.nexus`). Confirm Let's Encrypt certs auto-issue.
+- [ ] **5.7** **iframe proxy fallback** (depends on Phase 2.14 outcome). If Daytona preview URLs need a proxy to embed, configure Caddy with `reverse_proxy` + `header_down -X-Frame-Options` for the preview routes.
+- [ ] **5.8** Run the Phase 4 demo script against the production URL. Time it. Iterate until <3 minutes total and zero failures across 5 consecutive runs.
+- [ ] **5.9** **Resolve `questions.md` Q10 — fallback plan.** Pre-record a 90-second screen capture of the working demo (the "video fallback"). Wire a hidden keyboard shortcut (e.g. `cmd+shift+f`) to play it inline if the live demo wedges on stage.
+- [ ] **5.10** Build a **warm-spare Droplet** (Q7 mitigation): a second identical Droplet, kept healthy, behind a DO Load Balancer. DNS failover or a manual switch script. Cost: another $24/mo, worth it for demo day.
+- [ ] **5.11** Lighthouse audit on the landing page: ≥90 in Performance, Accessibility, Best Practices, SEO. Fix any easy wins (image sizes, font preloading, etc).
+- [ ] **5.12** Add basic observability: PM2 logs aggregated to a single file; a `/health` endpoint on the orchestrator that pings each upstream (Cursor, Daytona, Convex, Gemini); a simple status page at `nexus.example.com/status`.
+- [ ] **5.13** Final design pass: open the production URL on a 1080p display (the actual demo screen). Adjust any too-small text or low-contrast hovers. Compare against `docs/design/nexus/` references one more time.
+- [ ] **5.14** **Demo rehearsal — 10 dry runs.** Time each. Note where the avatar feels stiff, where the panel transitions are abrupt, where the user might get lost. Fix the top 3 issues.
+- [ ] **5.15** Write `README.md` (top of repo): one-paragraph product description, the architecture diagram, how to run locally, how to deploy. Link this `docs/build-plan.md` for "where we are."
+
+### Deliverables
+
+- A public URL (`https://nexus.example.com`) that anyone can hit and run the demo against.
+- A pre-recorded video fallback that plays on a single keystroke.
+- Five consecutive demo runs with zero failures.
+
+### Phase 5 Verification
+
+- [ ] Production URL serves over HTTPS with a valid Let's Encrypt cert.
+- [ ] Lighthouse landing page scores: Performance ≥90, Accessibility ≥95, Best Practices ≥95, SEO ≥90.
+- [ ] `nexus.example.com/status` returns green for all six upstream services.
+- [ ] Demo run from a fresh browser session (cleared cache) completes in <3 minutes with no errors. Recorded.
+- [ ] Failover test: kill the primary Droplet's orchestrator (`pm2 stop nexus-orchestrator`). Within 30s, either the warm spare takes traffic or the UI shows a graceful "Service is reconnecting" banner. **Not** a blank page or an unhandled WebRTC error.
+- [ ] iframe embedding works on the production domain (Phase 2.14 issue does not regress in prod).
+- [ ] LiveKit UDP ports are reachable from outside the Droplet (test with `nc -uvz <ip> 50000-50010`).
+- [ ] Cost per run measured against the budget in `docs/cost-per-run.md`. Total burn for 50 practice runs + judges + stage demo is within hackathon allowance.
+- [ ] Fallback video plays on the assigned keystroke. Tested on a second laptop, in case the demo machine misbehaves.
+- [ ] **Final demo dry run with a non-team-member as the user.** They speak naturally; the system holds together. They walk away wanting to use it.
+
+---
+
+## Phase Dependency Graph
+
+```
+Phase 1 ──► Phase 2 ──► Phase 4 ──► Phase 5
+              │            ▲
+              └► Phase 3 ──┘
+```
+
+Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is merged. Phase 4 is the integration; it cannot start until both 2 and 3 are verified.
+
+---
+
+## When You Are Stuck
+
+- **Stuck on Phase 1 fidelity?** The reference is `docs/design/nexus/`. Open `Nexus.html` in a browser to see exactly what we're shooting for. Don't reinvent — port.
+- **Stuck on Phase 2 streaming?** The Cursor SDK example in `coding-agent-architecture.md` §2 is canonical. Don't add layers; the for-await loop is the loop.
+- **Stuck on Phase 3 voice topology?** Q1 in `docs/questions.md` is the question that has to be answered first. Don't write LiveKit code until §3.0 is done.
+- **Stuck on Phase 4 narration?** Read Q3 in `docs/questions.md`. The dead-air problem is the demo killer; don't ship without a narration story.
+- **Stuck on Phase 5 deploy?** The exact commands are in `docs/coding-agent-architecture.md` §5. Caddy + PM2 + Docker LiveKit. No surprises — just execute.
+
+---
+
+## Open Decisions Tracked Here (so they don't go stale)
+
+| ID | Decision | Resolved In | Status |
+| -- | -------- | ----------- | ------ |
+| Q1 | Gemini fork: dual-stream vs tool-call | Phase 3.0 | [ ] |
+| Q2 | End-to-end latency budget | Phase 3.9 | [ ] |
+| Q3 | Avatar narration during codegen | Phase 4.5 | [ ] |
+| Q4 | Multi-turn sandbox state | Phase 2.15 | [ ] |
+| Q5 | Interruption mid-codegen | Phase 4.6 | [ ] |
+| Q6 | iframe X-Frame-Options | Phase 2.14 | [ ] |
+| Q7 | Failure-mode matrix | Phase 4.8 | [ ] |
+| Q8 | Convex vs sandbox source of truth | Phase 2 (implicit) | [ ] |
+| Q9 | Cost per run | Phase 4 verification | [ ] |
+| Q10 | Demo script + fallback | Phase 4 + 5.9 | [ ] |
+
+When you resolve one, update the **Status** column to `[x]` and link the file/section where the answer lives.
