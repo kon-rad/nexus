@@ -84,12 +84,12 @@ These apply to every phase. Don't re-decide them per phase.
   2. Sponsor strip — monochrome logos for Gemini Live, Tavus Phoenix-4, Cursor SDK, Daytona, Convex.
   3. 3-feature grid — Real-Time Voice, Secure Code Execution, Instant Live Preview.
   4. Final CTA section — full-width, repeats primary button.
-- [ ] **1.6** Build the **Workspace page** shell at `app/workspace/page.tsx`. Two-column split with draggable resize handle (default 30/70). Top nav bar spans the right panel only.
+- [x] **1.6** Build the **Workspace page** shell at `app/workspace/page.tsx`. Two-column split with draggable resize handle (default 30/70). Top nav bar spans the right panel only.
   - Left panel: placeholder `<div>` with a static avatar still-frame and the bottom glassmorphic mic-pill (mute toggle, end-call, fake waveform of static bars). Status badge at top-left.
   - Right panel: tabbed interface with **Live Preview**, **Code Inspection**, **Insights** tabs. Action buttons (Export, Settings, User avatar) at top-right.
-- [ ] **1.7** Build static **Live Preview tab** with the fake browser-shell chrome (3 dots, lock icon, URL `preview-7f3a-ax21.daytona.dev`, Copy URL button). Iframe stub points at `about:blank`.
-- [ ] **1.8** Build static **Code Inspection tab** with the file-tree sidebar (mirror `FILE_TREE` from `workspace.jsx`) and a Monaco editor showing one hard-coded TypeScript file. Streaming animation can be a CSS-only blinking cursor for now.
-- [ ] **1.9** Build static **Insights tab** with markdown explanation in the top half and a static xterm-styled `<pre>` in the bottom half (no real xterm.js yet).
+- [x] **1.7** Build static **Live Preview tab** with the fake browser-shell chrome (3 dots, lock icon, URL `preview-7f3a-ax21.daytona.dev`, Copy URL button). Iframe stub points at `about:blank`.
+- [x] **1.8** Build static **Code Inspection tab** with the file-tree sidebar (mirror `FILE_TREE` from `workspace.jsx`) and a Monaco editor showing one hard-coded TypeScript file. Streaming animation can be a CSS-only blinking cursor for now.
+- [x] **1.9** Build static **Insights tab** with markdown explanation in the top half and a static xterm-styled `<pre>` in the bottom half (no real xterm.js yet).
 - [ ] **1.10** Build the **Profile page** at `app/profile/page.tsx`. Centered 800px container. Three sections (Account, Integrations, Preferences) separated by `--border-subtle` dividers. Danger Zone at the bottom with muted-red Delete Account button.
 - [ ] **1.11** Wire client-side route navigation: Landing CTA → Workspace; Workspace user-avatar → Profile; Profile back arrow → Workspace.
 

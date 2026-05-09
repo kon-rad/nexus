@@ -9,6 +9,8 @@ type ProfileAvatarProps = {
   ring?: boolean;
   onClick?: () => void;
   title?: string;
+  /** When true, renders a non-interactive <span> instead of a <button>. Useful when wrapped in a <Link>. */
+  asChild?: boolean;
 };
 
 /**
@@ -22,6 +24,7 @@ export function ProfileAvatar({
   ring = false,
   onClick,
   title,
+  asChild = false,
 }: ProfileAvatarProps) {
   const style: CSSProperties = {
     width: size,
@@ -41,15 +44,30 @@ export function ProfileAvatar({
     backgroundImage: src ? `url(${src})` : undefined,
     backgroundSize: "cover",
     backgroundPosition: "center",
-    cursor: onClick ? "pointer" : "default",
+    cursor: asChild || onClick ? "pointer" : "default",
     transition: "box-shadow 200ms, border-color 200ms",
     flexShrink: 0,
   };
+  const className = `user-avatar ${ring ? "user-avatar--ring" : ""}`.trim();
+
+  if (asChild) {
+    return (
+      <span
+        className={className}
+        style={style}
+        title={title}
+        aria-label={title ?? `Profile avatar ${initials}`}
+      >
+        {!src && initials}
+      </span>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`user-avatar ${ring ? "user-avatar--ring" : ""}`.trim()}
+      className={className}
       style={style}
       title={title}
       aria-label={title ?? `Profile avatar ${initials}`}
