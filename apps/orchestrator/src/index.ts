@@ -32,6 +32,7 @@ import {
 import { getOrCreateSandbox, deleteSandbox } from "./daytona.js";
 import { runAgent } from "./cursor.js";
 import { registerLiveKitRoutes, setOrchestratorHooks } from "./livekit.js";
+import { registerFalRoutes } from "./fal-routes.js";
 import { resetNarration } from "./narration.js";
 
 export const ORCHESTRATOR_VERSION = "0.4.0";
@@ -91,6 +92,9 @@ fastify.get("/api/health", async () => ({
 
 // Phase 3+: LiveKit token mint + avatar-state mirror + Phase 4 tool-call routing.
 registerLiveKitRoutes(fastify);
+
+// fal.ai models discovery + invocation surface for the LiveKit agent.
+registerFalRoutes(fastify);
 
 // Wire the tool-call hooks AFTER routes are registered so livekit.ts can call
 // back into us without a circular import.
