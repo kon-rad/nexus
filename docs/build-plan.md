@@ -91,7 +91,7 @@ These apply to every phase. Don't re-decide them per phase.
 - [x] **1.8** Build static **Code Inspection tab** with the file-tree sidebar (mirror `FILE_TREE` from `workspace.jsx`) and a Monaco editor showing one hard-coded TypeScript file. Streaming animation can be a CSS-only blinking cursor for now.
 - [x] **1.9** Build static **Insights tab** with markdown explanation in the top half and a static xterm-styled `<pre>` in the bottom half (no real xterm.js yet).
 - [x] **1.10** Build the **Profile page** at `app/profile/page.tsx`. Centered 800px container. Three sections (Account, Integrations, Preferences) separated by `--border-subtle` dividers. Danger Zone at the bottom with muted-red Delete Account button.
-- [ ] **1.11** Wire client-side route navigation: Landing CTA → Workspace; Workspace user-avatar → Profile; Profile back arrow → Workspace.
+- [x] **1.11** Wire client-side route navigation: Landing CTA → Workspace; Workspace user-avatar → Profile; Profile back arrow → Workspace.
 
 ### Deliverables
 
