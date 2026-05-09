@@ -112,7 +112,6 @@ export default function LandingPage() {
           </a>
         </div>
         <div style={{ flex: 1 }} />
-        <GhostButton>Sign in</GhostButton>
         <Link href="/workspace" style={{ textDecoration: "none" }}>
           <PrimaryButton>Open Nexus</PrimaryButton>
         </Link>
