@@ -18,6 +18,7 @@ import {
   IconCode,
   IconDownload,
   IconPlay,
+  IconSparkle,
 } from "@/components/icons";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -30,8 +31,9 @@ import { Insights } from "./Insights";
 import { LivePreview } from "./LivePreview";
 import { SettingsModal, applySettings, loadSettings } from "./SettingsModal";
 import { FailureBanner } from "./FailureBanner";
+import { Generate } from "./Generate";
 
-type TabKey = "preview" | "code" | "insights";
+type TabKey = "preview" | "code" | "insights" | "generate";
 
 const DEV_PROMPT_BAR_ENABLED =
   process.env.NEXT_PUBLIC_DEV_PROMPT_BAR === "1";
@@ -40,6 +42,7 @@ const TABS: ReadonlyArray<TabItem<TabKey>> = [
   { key: "preview", label: "Live Preview", icon: <IconPlay size={11} /> },
   { key: "code", label: "Code", icon: <IconCode size={13} /> },
   { key: "insights", label: "Insights", icon: <IconBulb size={13} /> },
+  { key: "generate", label: "Generate", icon: <IconSparkle size={13} /> },
 ];
 
 const MIN_LEFT_PCT = 18;
@@ -451,6 +454,7 @@ export default function WorkspacePage() {
           {activeTab === "preview" ? <LivePreview sessionId={sessionId} /> : null}
           {activeTab === "code" ? <CodeInspection sessionId={sessionId} /> : null}
           {activeTab === "insights" ? <Insights sessionId={sessionId} /> : null}
+          {activeTab === "generate" ? <Generate sessionId={sessionId} /> : null}
         </div>
       </div>
 
