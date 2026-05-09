@@ -79,7 +79,7 @@ These apply to every phase. Don't re-decide them per phase.
   - `StatusBadge` (8px circle, green/purple/cyan, pulse animation)
   - `TabBar` (flat, 2px cyan bottom border on active)
   - `ProfileAvatar` (40px circle, cyan ring on hover, initials fallback)
-- [ ] **1.5** Build the **Landing page** at `app/(landing)/page.tsx`. Sections in order:
+- [x] **1.5** Build the **Landing page** at `app/(landing)/page.tsx`. Sections in order:
   1. Hero — "Your AI Co-Founder is Online." with cyan→purple gradient on "Online", subhead, primary CTA "Start Building — Free", ghost CTA "Watch Demo", and a 3D-tilted mockup of the workspace on the right (use `HeroWorkspaceMock` from `landing.jsx` as your reference).
   2. Sponsor strip — monochrome logos for Gemini Live, Tavus Phoenix-4, Cursor SDK, Daytona, Convex.
   3. 3-feature grid — Real-Time Voice, Secure Code Execution, Instant Live Preview.
