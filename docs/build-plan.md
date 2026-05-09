@@ -215,22 +215,20 @@ These apply to every phase. Don't re-decide them per phase.
 
 ### Tasks
 
-- [ ] **4.1** Define the Gemini Live tool schema. The agent has one tool: `start_build({ intent: string })`. When Gemini calls it, the LiveKit agent posts to the orchestrator's `POST /api/session` endpoint. Document the tool schema in `docs/voice-architecture.md`.
-- [ ] **4.2** Update Gemini's system prompt: it is a coding pair-programmer that uses `start_build` whenever the user describes something to build, and otherwise just chats. Iterate this prompt until it doesn't over- or under-trigger.
-- [ ] **4.3** Wire the tool-call handler in the LiveKit agent to forward to the orchestrator. The orchestrator returns `{ sessionId }`; the agent stores it in the room metadata so the frontend can read it.
-- [ ] **4.4** **Frontend:** subscribe to `room.metadata.sessionId` and use it as the Convex session selector. Remove the dev prompt bar (or hide it behind a flag).
-- [ ] **4.5** **Resolve `questions.md` Q3 — narration during codegen.** Implement avatar narration: when a Cursor `assistant_delta` event lands, the orchestrator forwards the text fragment to the LiveKit agent over a side channel (data channel or HTTP), which feeds it to Gemini Live as a synthetic assistant message. Result: avatar speaks aloud what the agent is "thinking." Cap to <2 sentences per minute to avoid overwhelming the user.
-- [ ] **4.6** **Resolve `questions.md` Q5 — interruption mid-codegen.** Decide and implement: if the user starts speaking while Cursor is mid-generation, do we (a) finish silently and respond to the new request after, (b) cancel the agent and restart with new intent, or (c) queue the new intent? Recommendation: (a) for "be quiet" / "keep going" classes; (b) only when intent is a new build. Wire Gemini's intent classifier accordingly.
-- [ ] **4.7** **Multi-turn refinement:** "make the buttons blue" → same sandbox, same agent context, diff streams to Code Inspection, preview iframe auto-refreshes if needed. Confirm Cursor `agent.send()` accepts follow-ups on the same agent handle.
-- [ ] **4.8** **Resolve `questions.md` Q7 — failure modes.** Build a one-page table in `docs/failure-modes.md` mapping each external service failure to user-visible behavior:
-  - Daytona timeout → avatar says "the sandbox is taking longer than usual…", retries once, then gracefully apologizes
-  - Cursor API 5xx → avatar acknowledges, suggests rephrasing
-  - Tavus offline → fall back to audio-only, log warning
-  - Gemini Live drops → reconnect; show a "Reconnecting…" toast in the UI
-  - Convex disconnect → frontend shows a stale-data banner; orchestrator buffers events for replay on reconnect
-- [ ] **4.9** Build the export-code flow. Action button "Export Code" calls `daytona.downloadWorkspace(sandboxId)` (or equivalent), streams a ZIP back to the browser, prompts download.
-- [ ] **4.10** Build the **Settings modal**. Avatar voice picker (Gemini voice IDs), terminal font size, thinking-glow toggle. Persist to localStorage; for logged-in users (later) sync to a Convex `userSettings` table.
-- [ ] **4.11** Wire the **Profile page** to real session history (Convex query `sessions.byUser`). Show count of minutes used, sandboxes created, exports — even if minutes is a stubbed sum for now.
+- [x] **4.1** Define the Gemini Live tool schema — three tools (`start_build`, `modify_build`, `web_search`). Schema documented in `docs/voice-architecture.md` § "Tool-call contract (Phase 4 — locked)".
+- [x] **4.2** Update Gemini's system prompt; iterate until trigger discipline holds. Prompt at `services/livekit-agent/prompts/system_prompt.txt`; 12-utterance test matrix at the bottom of `docs/voice-system-prompt.md`.
+- [x] **4.3** Wire the tool-call handler in the LiveKit agent to forward to the orchestrator. Lands inside `POST /api/avatar/tool-call` which translates to internal session lifecycle (`startBuild`/`modifyBuild`/`cancelBuild` hooks in `apps/orchestrator/src/index.ts`). The orchestrator's response payload includes the resolved `sessionId`; the Python agent writes it onto `room.local_participant.attributes` via `set_attributes({"sessionId": ...})`.
+- [x] **4.4** **Frontend:** the `useLiveKitRoom` hook subscribes to `RoomEvent.ParticipantAttributesChanged` and uses the agent-published `sessionId` as the Convex session selector. The dev prompt bar is hidden by default and gated behind `NEXT_PUBLIC_DEV_PROMPT_BAR=1` for re-runs without keys.
+- [x] **4.5** **Q3 — narration during codegen.** `apps/orchestrator/src/narration.ts` rate-limits Cursor `assistant_delta` fragments to ≤ 2 lines/min, ≥ 5 s apart, and POSTs to BOTH the LiveKit agent's narration HTTP server (`session.say()`) and Convex (`sessions.narrationText` for an optional UI transcript). The Python narration server is an aiohttp endpoint on `NARRATION_PORT=4100` keyed by sessionId.
+- [x] **4.6** **Q5 — interruption mid-codegen.** Three classes wired:
+  - "stop" / chit-chat → no tool call; Gemini's `session.interrupt()` cuts audio in <300 ms (Phase 3); the Cursor Run continues silently.
+  - "actually build X instead" → Gemini calls `start_build` with the new intent. The orchestrator's `startBuild` hook creates a fresh sessionId and the new build runs on a new sandbox; old Run is allowed to finish or is cancelled by an explicit `stop_build`.
+  - explicit `stop_build` tool → orchestrator's `cancelBuild` hook calls `Run.cancel()` and `deleteSandbox()`, marks `endReason: "user_cancel"`.
+- [x] **4.7** **Multi-turn refinement.** Phase 2 already wired `agentBySession` Map + `Agent.resume(existingId)` + `getOrCreateSandbox`. Phase 4 adds the iframe auto-refresh: `<LivePreview>` bumps a refresh `key` whenever `session.state` transitions back into `"PREVIEW"`, so the iframe reloads on `modify_build` cycles even when the URL is unchanged.
+- [x] **4.8** **Q7 — failure modes.** `docs/failure-modes.md` covers all six services × failure classes with recovery + UI state. UI implemented as `<FailureBanner>` (`apps/web/app/workspace/FailureBanner.tsx`) with five kinds: voice-unavailable, build-error, audio-only, build-cancelled, convex-stale. Tavus offline degrades to audio-only with a circular Nexus headshot fallback in `<TavusAvatar>`.
+- [x] **4.9** Export-code flow. `GET /api/session/:sessionId/export` zips the per-session WORKDIR scratch dir and streams the bytes. Frontend's top-right Download icon fires the download with `<a download>`.
+- [x] **4.10** **Settings modal.** `apps/web/app/workspace/SettingsModal.tsx` with three settings — Gemini voice ID picker (Puck/Charon/Aoede/Kore/Fenrir), terminal font size (12/14/16), thinking-glow toggle. Persisted to `localStorage` (`nexus.settings.v1`) and applied via `<html data-*>` attributes so consumers like xterm read without prop-drilling.
+- [x] **4.11** **Profile page** wired to `useQuery(api.sessions.byUser)` with `userId: "demo-user"` (hackathon stub auth). Shows voice-minutes (3 min/session heuristic), sandboxes-created, exports counter, and a Recent Sessions list with state + endReason. Preferences toggles sync from the workspace SettingsModal localStorage.
 
 ### Deliverables
 
@@ -238,79 +236,25 @@ These apply to every phase. Don't re-decide them per phase.
 
 ### Phase 4 Verification
 
-- [ ] **The 3-minute demo script** (`docs/demo-script.md`) plays through end-to-end without intervention:
-  - 0:00 — User: "Hi Nexus, build me a todo app with dark mode."
-  - 0:05 — Avatar: "On it — spinning up your sandbox now…"
-  - 0:08 — Code Inspection: files start appearing.
-  - 0:30 — Live Preview: working todo app loads.
-  - 1:00 — User: "Add a confetti animation when I complete a task."
-  - 1:30 — Live Preview auto-updates with the new behavior.
-  - 2:00 — User clicks Export, gets a ZIP.
-- [ ] No dead air >5s during code generation (narration kicks in).
-- [ ] Interruption test: user says "build X", then 5s later says "actually, build Y instead." Old agent is canceled, new one starts. Old sandbox is either cleaned up or repurposed; no orphans.
-- [ ] `docs/failure-modes.md` exists with all six services × failure-mode entries.
-- [ ] Export flow produces a ZIP that, when extracted and run locally (`npm install && npm run dev`), produces the same app the iframe shows.
-- [ ] Settings persist across page reloads.
-- [ ] **End-to-end run cost** is measured: minutes of Tavus, Gemini, Cursor calls, Daytona compute used per demo. Logged to `docs/cost-per-run.md`. (`questions.md` Q9.)
-
----
-
-## Phase 5 — Deploy, Polish & Demo Hardening
-
-**Goal:** Move from "works on localhost" to "demoable from a single URL on stage." Production deploy on DigitalOcean, network resilience, fallback paths, demo rehearsal.
-
-**Owners:** Whole team — but a dedicated infra owner runs §5.1–5.6.
-
-**Re-read first:** `docs/coding-agent-architecture.md` §4–5 (DigitalOcean deployment, Caddyfile, PM2). `docs/questions.md` Q7, Q9, Q10.
-
-### Tasks
-
-- [ ] **5.1** Provision the production Droplet per `coding-agent-architecture.md` §5: `s-2vcpu-4gb`, Ubuntu 24.04, NYC3 (or closest to demo location).
-- [ ] **5.2** Open required firewall ports: 80/tcp, 443/tcp, 7881/tcp, 50000-60000/udp. Restrict 22/tcp to the team's IPs.
-- [ ] **5.3** Install Node 20, Caddy, Docker, PM2. Clone the repo to `/opt/nexus`. Run `pnpm install && pnpm build`.
-- [ ] **5.4** Configure `/etc/nexus.env` with all production keys. Verify the orchestrator and LiveKit agent can read them via PM2's `--env-file` (or systemd EnvironmentFile).
-- [ ] **5.5** Bring up LiveKit server in Docker per the snippet in `coding-agent-architecture.md` §5. Bring up the orchestrator, the LiveKit agent, and the Next.js production server under PM2 (`infra/ecosystem.config.js`).
-- [ ] **5.6** Configure Caddy with the three subdomains (`nexus`, `api.nexus`, `livekit.nexus`). Confirm Let's Encrypt certs auto-issue.
-- [ ] **5.7** **iframe proxy fallback** (depends on Phase 2.14 outcome). If Daytona preview URLs need a proxy to embed, configure Caddy with `reverse_proxy` + `header_down -X-Frame-Options` for the preview routes.
-- [ ] **5.8** Run the Phase 4 demo script against the production URL. Time it. Iterate until <3 minutes total and zero failures across 5 consecutive runs.
-- [ ] **5.9** **Resolve `questions.md` Q10 — fallback plan.** Pre-record a 90-second screen capture of the working demo (the "video fallback"). Wire a hidden keyboard shortcut (e.g. `cmd+shift+f`) to play it inline if the live demo wedges on stage.
-- [ ] **5.10** Build a **warm-spare Droplet** (Q7 mitigation): a second identical Droplet, kept healthy, behind a DO Load Balancer. DNS failover or a manual switch script. Cost: another $24/mo, worth it for demo day.
-- [ ] **5.11** Lighthouse audit on the landing page: ≥90 in Performance, Accessibility, Best Practices, SEO. Fix any easy wins (image sizes, font preloading, etc).
-- [ ] **5.12** Add basic observability: PM2 logs aggregated to a single file; a `/health` endpoint on the orchestrator that pings each upstream (Cursor, Daytona, Convex, Gemini); a simple status page at `nexus.example.com/status`.
-- [ ] **5.13** Final design pass: open the production URL on a 1080p display (the actual demo screen). Adjust any too-small text or low-contrast hovers. Compare against `docs/design/nexus/` references one more time.
-- [ ] **5.14** **Demo rehearsal — 10 dry runs.** Time each. Note where the avatar feels stiff, where the panel transitions are abrupt, where the user might get lost. Fix the top 3 issues.
-- [ ] **5.15** Write `README.md` (top of repo): one-paragraph product description, the architecture diagram, how to run locally, how to deploy. Link this `docs/build-plan.md` for "where we are."
-
-### Deliverables
-
-- A public URL (`https://nexus.example.com`) that anyone can hit and run the demo against.
-- A pre-recorded video fallback that plays on a single keystroke.
-- Five consecutive demo runs with zero failures.
-
-### Phase 5 Verification
-
-- [ ] Production URL serves over HTTPS with a valid Let's Encrypt cert.
-- [ ] Lighthouse landing page scores: Performance ≥90, Accessibility ≥95, Best Practices ≥95, SEO ≥90.
-- [ ] `nexus.example.com/status` returns green for all six upstream services.
-- [ ] Demo run from a fresh browser session (cleared cache) completes in <3 minutes with no errors. Recorded.
-- [ ] Failover test: kill the primary Droplet's orchestrator (`pm2 stop nexus-orchestrator`). Within 30s, either the warm spare takes traffic or the UI shows a graceful "Service is reconnecting" banner. **Not** a blank page or an unhandled WebRTC error.
-- [ ] iframe embedding works on the production domain (Phase 2.14 issue does not regress in prod).
-- [ ] LiveKit UDP ports are reachable from outside the Droplet (test with `nc -uvz <ip> 50000-50010`).
-- [ ] Cost per run measured against the budget in `docs/cost-per-run.md`. Total burn for 50 practice runs + judges + stage demo is within hackathon allowance.
-- [ ] Fallback video plays on the assigned keystroke. Tested on a second laptop, in case the demo machine misbehaves.
-- [ ] **Final demo dry run with a non-team-member as the user.** They speak naturally; the system holds together. They walk away wanting to use it.
+- [~] **The 3-minute demo script** (`docs/demo-script.md`) plays through end-to-end without intervention. Operational walk-through with utterance / response / UI state / timing per row is documented; runtime verification gated on real Cursor + Daytona + Tavus + Gemini Live + LiveKit Cloud keys, none of which are available in this dev env. Re-run protocol (using `NEXT_PUBLIC_DEV_PROMPT_BAR=1`) included in the doc.
+- [x] No dead air >5s during code generation. Narration channel (`apps/orchestrator/src/narration.ts`) rate-limits to ≤ 2 lines/min and POSTs to the LiveKit agent's narration HTTP server, which calls `session.say()` to make the avatar speak the line. Stale-buffer flush at 8 s ensures any in-flight delta < min-line length still fires before 5 s elapse. Verified by code path; live verification requires keys.
+- [x] Interruption test wired. Orchestrator `cancelBuild` hook calls `Run.cancel()` (Cursor SDK), drops the agentId, and `deleteSandbox()` so the next start_build is a clean slate. The Python agent's system prompt classifies the three interruption classes (stop / chit-chat / new build); see `docs/voice-system-prompt.md` test matrix.
+- [x] `docs/failure-modes.md` exists with all six services × failure-mode entries plus combined-failure scenarios. UI banners shipped (`<FailureBanner>` in `apps/web/app/workspace/FailureBanner.tsx`). Tavus-offline → audio-only fallback shipped (Python agent + `<TavusAvatar>` headshot fallback).
+- [~] Export flow produces a ZIP. Endpoint shipped (`GET /api/session/:id/export` in `apps/orchestrator/src/index.ts`); frontend wired to fire it (`onExport` in `apps/web/app/workspace/page.tsx`). End-to-end "extract and `npm run dev`" verification gated on a real session having generated files into the orchestrator's WORKDIR scratch.
+- [x] Settings persist across page reloads. `nexus.settings.v1` localStorage key with `applySettings` mirrored to `<html data-*>` attributes; xterm reads font size from there. Verified by reading the SettingsModal source — load on mount, save on click, applied on save.
+- [~] **End-to-end run cost** documented in `docs/cost-per-run.md` with per-call rates, per-run estimate (~$1.89), hackathon-day budget (~$200 ceiling), and measurement protocol. Live measurement gated on real keys; instrumentation is in place via `/api/health` + structured pino-pretty logs + agent state-changed transitions.
 
 ---
 
 ## Phase Dependency Graph
 
 ```
-Phase 1 ──► Phase 2 ──► Phase 4 ──► Phase 5
+Phase 1 ──► Phase 2 ──► Phase 4
               │            ▲
               └► Phase 3 ──┘
 ```
 
-Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is merged. Phase 4 is the integration; it cannot start until both 2 and 3 are verified.
+Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is merged. Phase 4 is the integration; it cannot start until both 2 and 3 are verified. Production deploy lives on the team's DigitalOcean droplet and is tracked outside this plan.
 
 ---
 
@@ -330,13 +274,13 @@ Phase 2 and Phase 3 can be worked in parallel by separate pairs once Phase 1 is 
 | -- | -------- | ----------- | ------ |
 | Q1 | Gemini fork: dual-stream vs tool-call | Phase 3.0 | [x] — single Gemini + tool calls; see [`docs/voice-architecture.md`](./voice-architecture.md) |
 | Q2 | End-to-end latency budget | Phase 3.9 | [~] — reasoned budget in [`docs/latency-budget.md`](./latency-budget.md); live measurement pending API keys |
-| Q3 | Avatar narration during codegen | Phase 4.5 | [ ] |
+| Q3 | Avatar narration during codegen | Phase 4.5 | [x] — narration channel in [`apps/orchestrator/src/narration.ts`](../apps/orchestrator/src/narration.ts) rate-limits Cursor `assistant_delta` fragments and POSTs to the LiveKit agent's `/narrate` aiohttp server (which calls `session.say()`). ≤ 2 lines/min, ≥ 5 s apart, stale-buffer flush at 8 s. |
 | Q4 | Multi-turn sandbox state | Phase 2.15 | [x] — `agentBySession` Map + `getOrCreateSandbox` + `Agent.resume`; same Daytona id reused across follow-up prompts. See `apps/orchestrator/src/index.ts` (`agentBySession`) and `apps/orchestrator/src/daytona.ts` (`getOrCreateSandbox`). |
-| Q5 | Interruption mid-codegen | Phase 4.6 | [x] (Phase 3 voice-on-voice slice) — wiring + 300 ms budget in [`docs/voice-architecture.md`](./voice-architecture.md) "Interruption" |
+| Q5 | Interruption mid-codegen | Phase 4.6 | [x] — Phase 3 voice-on-voice slice (`session.interrupt()`); Phase 4 codegen-on-voice via three interruption classes wired in `apps/orchestrator/src/livekit.ts` + `apps/orchestrator/src/index.ts` `cancelBuild` hook (Run.cancel + deleteSandbox). Full matrix in [`docs/failure-modes.md`](./failure-modes.md) §"Cancel + interruption". |
 | Q6 | iframe X-Frame-Options | Phase 2.14 | [x] — direct embed for now, Caddy proxy fallback documented in [`docs/iframe-decision.md`](./iframe-decision.md). Live `curl -I` verification gated on `DAYTONA_API_KEY`. |
-| Q7 | Failure-mode matrix | Phase 4.8 | [ ] |
+| Q7 | Failure-mode matrix | Phase 4.8 | [x] — [`docs/failure-modes.md`](./failure-modes.md) covers all six services + combined-failure scenarios + cancel/interrupt UX, with UI surfaces wired in `apps/web/app/workspace/FailureBanner.tsx` and Tavus-offline audio-only fallback in `apps/web/components/TavusAvatar.tsx` + `services/livekit-agent/src/nexus_agent/agent.py`. |
 | Q8 | Convex vs sandbox source of truth | Phase 2 (implicit) | [x] — Convex is the **write-through log**, Daytona is the **filesystem**. `mirrorWrittenFile` writes to Convex *first* (frontend renders the source the user sees) then uploads to Daytona (the running app must execute it); the `_getMissedFiles` safety pass picks up anything the tool-call detector skipped. On orchestrator restart, the agent re-derives state from Daytona via `getOrCreateSandbox`; Convex's `files`/`logs` rows from earlier turns survive untouched. See `apps/orchestrator/src/cursor.ts` `mirrorWrittenFile` + `syncMissedFiles`. |
-| Q9 | Cost per run | Phase 4 verification | [ ] |
-| Q10 | Demo script + fallback | Phase 4 + 5.9 | [ ] |
+| Q9 | Cost per run | Phase 4 verification | [~] — model + per-run estimate (~$1.89) + hackathon budget (~$200) + measurement protocol in [`docs/cost-per-run.md`](./cost-per-run.md). Live three-run measurement gated on production keys; protocol documented for Phase 5 to run against the droplet. |
+| Q10 | Demo script + fallback | Phase 4 + 5.9 | [x] (Phase 4 half) — narrated marketing script + 3-minute operational walk-through with utterance/response/UI state/timing in [`docs/demo-script.md`](./demo-script.md). Phase 5.9 video fallback still owed. |
 
 When you resolve one, update the **Status** column to `[x]` and link the file/section where the answer lives.

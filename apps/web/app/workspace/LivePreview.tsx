@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -21,7 +21,23 @@ export function LivePreview({ sessionId }: { sessionId: string | null }) {
     api.sandbox.bySession,
     sessionId ? { sessionId: sessionId as Id<"sessions"> } : "skip",
   );
+  const session = useQuery(
+    api.sessions.get,
+    sessionId ? { sessionId: sessionId as Id<"sessions"> } : "skip",
+  );
   const [copied, setCopied] = useState(false);
+
+  // Phase 4.7: bump a key on each PREVIEW transition so the iframe reloads
+  // even when previewUrl is unchanged across a modify_build cycle.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const lastStateRef = useRef<string | null>(null);
+  useEffect(() => {
+    const next = (session?.state as string | undefined) ?? null;
+    if (next === "PREVIEW" && lastStateRef.current !== "PREVIEW") {
+      setRefreshKey((k) => k + 1);
+    }
+    lastStateRef.current = next;
+  }, [session?.state]);
 
   const previewUrl = sandbox?.previewUrl ?? null;
   const displayHost = previewUrl
@@ -158,6 +174,7 @@ export function LivePreview({ sessionId }: { sessionId: string | null }) {
         reactively via Convex when the orchestrator publishes a previewUrl.
       */}
       <iframe
+        key={refreshKey}
         title="Live preview"
         src={previewUrl ?? "about:blank"}
         // sandbox + allow are needed because Daytona preview URLs serve user
