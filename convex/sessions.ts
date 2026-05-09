@@ -97,3 +97,53 @@ export const list = query({
     return all.filter((s) => s.userId === userId);
   },
 });
+
+/**
+ * Phase 4.11: profile-page session list. Returns up to 50 most recent
+ * sessions for a user, newest first. The page derives "minutes used" by
+ * subtracting createdAt from the most recent activity timestamp on the row.
+ */
+export const byUser = query({
+  args: { userId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { userId, limit }) => {
+    const cap = Math.min(Math.max(limit ?? 50, 1), 200);
+    const all = await ctx.db.query("sessions").order("desc").take(cap * 4);
+    return all.filter((s) => s.userId === userId).slice(0, cap);
+  },
+});
+
+/**
+ * Phase 4.5: write the latest narration line the orchestrator forwarded to
+ * the LiveKit agent. The frontend can optionally surface this as a
+ * transcript ribbon while the avatar is mid-narration.
+ */
+export const updateNarration = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    narrationText: v.string(),
+  },
+  handler: async (ctx, { sessionId, narrationText }) => {
+    await ctx.db.patch(sessionId, {
+      narrationText,
+      narrationTs: Date.now(),
+    });
+  },
+});
+
+/**
+ * Phase 4.6: mark a session as ended with a reason. The frontend reads
+ * `endReason` to render the failure banner ("Build cancelled", "Tavus
+ * offline — audio only", etc).
+ */
+export const endSession = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    endReason: v.string(),
+    state: v.optional(v.string()),
+  },
+  handler: async (ctx, { sessionId, endReason, state }) => {
+    const patch: Record<string, unknown> = { endReason };
+    if (state !== undefined) patch.state = state;
+    await ctx.db.patch(sessionId, patch);
+  },
+});

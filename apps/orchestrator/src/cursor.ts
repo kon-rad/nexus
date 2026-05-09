@@ -22,6 +22,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { Agent, type SDKAgent } from "@cursor/sdk";
+import type { Run } from "@cursor/sdk";
 import type { NexusSandbox } from "./daytona.js";
 import {
   appendLogs,
@@ -31,6 +32,7 @@ import {
   updateSessionState,
   upsertFile,
 } from "./convex-pusher.js";
+import { onAssistantDelta } from "./narration.js";
 
 const SYSTEM_PROMPT = `You are Nexus, an AI pair-programmer. The user has described an application they want built.
 
@@ -59,17 +61,25 @@ interface RunAgentArgs {
   existingAgentId?: string;
   /** Per-session scratch dir for the local Cursor agent. */
   cwd: string;
+  /**
+   * Phase 4.6: optional handle that the caller can use to cancel the in-flight
+   * Cursor Run. Populated synchronously after `agent.send()` resolves.
+   */
+  onRunHandle?: (run: Run) => void;
 }
 
 interface RunAgentResult {
   agentId: string;
   finishedOk: boolean;
   filesTouched: string[];
+  /** True if the run was cancelled mid-stream. */
+  cancelled: boolean;
 }
 
 export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
-  const { prompt, sandbox, sessionId, existingAgentId, cwd } = args;
+  const { prompt, sandbox, sessionId, existingAgentId, cwd, onRunHandle } = args;
   await fs.mkdir(cwd, { recursive: true });
+  let cancelled = false;
 
   const apiKey = process.env.CURSOR_API_KEY;
   if (!apiKey) {
@@ -102,14 +112,20 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
     : `${SYSTEM_PROMPT}\n\nUser request: ${prompt}`;
 
   const run = await agent.send(fullPrompt);
+  if (onRunHandle) onRunHandle(run);
 
-  for await (const event of run.stream()) {
+  try {
+    for await (const event of run.stream()) {
     switch (event.type) {
       case "assistant": {
-        // Stream assistant text to Convex as separate events for narration.
+        // Stream assistant text to Convex as separate events for narration,
+        // and forward through the Phase 4.5 narration channel so the avatar
+        // can speak aloud what the agent is thinking.
         for (const block of event.message.content) {
           if (block.type === "text") {
             await pushEvent(sessionId, "assistant_delta", { text: block.text });
+            // Best-effort, fire-and-forget. The narration helper is rate-limited.
+            void onAssistantDelta(sessionId, block.text);
           }
         }
         break;
@@ -157,15 +173,41 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
         break;
     }
   }
+  } catch (e) {
+    // The Cursor SDK throws when its run is cancelled mid-stream. Treat that
+    // as a clean Phase 4.6 stop. Anything else propagates.
+    const msg = String((e as Error)?.message ?? e);
+    if (msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("aborted")) {
+      cancelled = true;
+    } else {
+      throw e;
+    }
+  }
 
-  const result = await run.wait();
+  let result: Awaited<ReturnType<Run["wait"]>>;
+  try {
+    result = await run.wait();
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    if (msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("aborted")) {
+      cancelled = true;
+      result = { status: "cancelled" } as Awaited<ReturnType<Run["wait"]>>;
+    } else {
+      throw e;
+    }
+  }
 
   // Final pass: walk the cwd and pick up any file the tool-call detector missed.
-  // This is a safety net for tool names we don't recognize.
-  await syncMissedFiles({ cwd, sessionId, sandbox, tracker: filesTouched });
+  // Skipped on cancel — the user explicitly asked us to stop.
+  if (!cancelled) {
+    await syncMissedFiles({ cwd, sessionId, sandbox, tracker: filesTouched });
+  }
 
-  // Now that all writes are in Daytona, kick off install + start.
-  if (result.status === "finished") {
+  if (cancelled || result.status === "cancelled") {
+    await updateSessionState(sessionId, "DONE", {
+      statusMessage: "Build cancelled",
+    });
+  } else if (result.status === "finished") {
     await updateSessionState(sessionId, "RUNNING", {
       statusMessage: "Installing dependencies and starting app…",
     });
@@ -180,6 +222,7 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
     agentId: agent.agentId,
     finishedOk: result.status === "finished",
     filesTouched: [...filesTouched],
+    cancelled,
   };
 }
 

@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import Image from "next/image";
 import type { RemoteVideoTrack } from "livekit-client";
 import type { AvatarState } from "@/lib/livekit";
 
@@ -68,10 +69,17 @@ export function TavusAvatar({ videoTrack, state, connecting }: TavusAvatarProps)
           }}
         />
       ) : (
-        // Fallback: keep the orb placeholder visible while Tavus connects so
-        // the panel never goes empty (Phase 4 swaps for a graceful curtain).
+        // Fallback: show the Nexus headshot so the panel never goes empty
+        // while Tavus connects.
         <>
-          <div className="presence-orb" />
+          <Image
+            src="/nexus.png"
+            alt="Nexus"
+            fill
+            priority
+            sizes="(max-width: 1200px) 60vw, 700px"
+            style={{ objectFit: "cover", zIndex: 0 }}
+          />
           <div className="presence-grain" />
         </>
       )}

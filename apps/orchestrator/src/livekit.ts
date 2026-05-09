@@ -1,28 +1,38 @@
 /**
- * Phase 3 — LiveKit token mint + avatar-state surface for the LiveKit agent.
+ * LiveKit token mint, agent dispatch, avatar state, tool-call routing.
  *
- * Three endpoints:
+ * Endpoints:
  *
- *   POST /api/livekit/token       { sessionId? } → { token, url, room, identity }
- *     Mints a short-lived JWT for the browser. Grants room subscribe + mic
- *     publish, and stamps an agent dispatch for `LIVEKIT_AGENT_NAME` so the
- *     Python worker is automatically jobbed into the room. If sessionId is
- *     missing, lazily creates a Convex session (ensureVoiceSession) so the
- *     agent has somewhere to write avatarState.
+ *   POST /api/livekit/token       { sessionId? } → { token, url, room, identity, sessionId, agentName }
+ *     Mints a 10-min JWT for the browser. Grants room subscribe + mic publish.
+ *     Phase 4: AFTER the token is minted, we use AgentDispatchClient (Twirp)
+ *     to dispatch the worker to the room. JWT-side dispatch is gone — this
+ *     fixes the v1.11 server / 2.15 SDK proto incompat the Phase 3 hotfix
+ *     papered over with empty agent_name + auto-join.
  *
  *   POST /api/avatar/state        { sessionId, avatarState, livekitRoom? }
- *     Called by the LiveKit agent on every agent_state_changed event.
- *     Mirrors the value into Convex sessions.avatarState; the workspace's
- *     useQuery hook re-renders the StatusBadge.
+ *     Mirrors agent_state_changed events to Convex sessions.avatarState.
  *
  *   POST /api/avatar/tool-call    { sessionId, name, args }
- *     Phase 3 stub. Logs the call. Phase 4 routes start_build → /api/session.
+ *     Phase 4 dispatch. start_build → kicks a fresh codegen run on the same
+ *     session row (POST /api/session under the hood, which creates a Convex
+ *     row when sessionId is missing/voice-only). modify_build → reuses the
+ *     existing session, resumes the Cursor agent + Daytona sandbox.
+ *     stop_build → cancels the active Cursor Run for the session.
+ *
+ *   POST /api/avatar/narrate      { sessionId, text }
+ *     Phase 4.5 narration channel. The orchestrator pushes Cursor
+ *     assistant_delta fragments here (rate-limited); the LiveKit agent
+ *     polls Convex via the same row to read narration. Or, if a direct HTTP
+ *     hook to the agent is available, we POST to it. Either way, the avatar
+ *     speaks aloud what the agent is "thinking" so dead-air is bounded
+ *     (Q3).
  *
  * Secrets stay here. The browser only ever sees the JWT, scoped to one room.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, AgentDispatchClient } from "livekit-server-sdk";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api.js";
 import type { Id } from "../../../convex/_generated/dataModel.js";
@@ -42,6 +52,7 @@ interface TokenResponseBody {
   identity: string;
   sessionId: SessionId;
   agentName: string;
+  agentDispatched: boolean;
 }
 
 interface AvatarStateBody {
@@ -56,6 +67,47 @@ interface ToolCallBody {
   args?: Record<string, unknown>;
 }
 
+interface NarrateBody {
+  sessionId: string;
+  text: string;
+}
+
+interface ToolCallResponse {
+  ok: boolean;
+  sessionId: string;
+  name: string;
+  status: "started" | "queued" | "cancelled" | "ignored";
+  reason?: string;
+}
+
+/**
+ * Hook the orchestrator's session dispatcher injects so this module can call
+ * back into the in-process session map without a circular import. Set by
+ * `index.ts` at boot via `setOrchestratorHooks`.
+ */
+export interface OrchestratorHooks {
+  /** Kick a fresh codegen run. Returns the resolved sessionId. */
+  startBuild(args: {
+    sessionId: string | undefined;
+    intent: string;
+  }): Promise<{ sessionId: SessionId }>;
+  /** Modify an existing build via Agent.resume. */
+  modifyBuild(args: {
+    sessionId: string;
+    change: string;
+  }): Promise<{ sessionId: SessionId }>;
+  /** Cancel the in-flight Cursor Run for a session. No-op if none running. */
+  cancelBuild(args: {
+    sessionId: string;
+    reason: string;
+  }): Promise<{ ok: boolean }>;
+}
+
+let _hooks: OrchestratorHooks | null = null;
+export function setOrchestratorHooks(hooks: OrchestratorHooks): void {
+  _hooks = hooks;
+}
+
 const TOKEN_TTL_SECONDS = 10 * 60;
 
 let _convex: ConvexHttpClient | null = null;
@@ -65,6 +117,19 @@ function convex(): ConvexHttpClient | null {
   if (!url) return null; // Convex is optional in the LiveKit-only smoke path.
   _convex = new ConvexHttpClient(url);
   return _convex;
+}
+
+let _dispatchClient: AgentDispatchClient | null = null;
+function dispatchClient(): AgentDispatchClient | null {
+  if (_dispatchClient) return _dispatchClient;
+  const url = process.env.LIVEKIT_URL;
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (!url || !apiKey || !apiSecret) return null;
+  // AgentDispatchClient wants the HTTPS host, not the wss URL. Convert.
+  const host = url.replace(/^wss?:\/\//i, "https://");
+  _dispatchClient = new AgentDispatchClient(host, apiKey, apiSecret);
+  return _dispatchClient;
 }
 
 function readEnvOrThrow(name: string): string {
@@ -81,16 +146,15 @@ function makeRoomName(sessionId: string): string {
   return `nexus-${sessionId}`;
 }
 
-/** Mint a LiveKit JWT that joins one room and dispatches the Nexus agent. */
+/** Mint a LiveKit JWT that joins one room. */
 async function mintToken(opts: {
   apiKey: string;
   apiSecret: string;
   identity: string;
   roomName: string;
-  agentName: string;
   sessionId: string;
 }): Promise<string> {
-  const { apiKey, apiSecret, identity, roomName, agentName, sessionId } = opts;
+  const { apiKey, apiSecret, identity, roomName, sessionId } = opts;
   const at = new AccessToken(apiKey, apiSecret, {
     identity,
     ttl: TOKEN_TTL_SECONDS,
@@ -101,14 +165,43 @@ async function mintToken(opts: {
     canPublish: true,
     canSubscribe: true,
     canPublishData: true,
+    canUpdateOwnMetadata: true,
   });
-  // Stash sessionId in participant metadata. The LiveKit agent reads it from
-  // the room's first participant. Avoids RoomAgentDispatch's "deployment"
-  // field, which livekit-server v1.11 rejects when seen in JWT JSON. Still
-  // dispatches the agent automatically because the worker matches on
-  // `agent_name` and our worker is registered with that name.
-  at.metadata = JSON.stringify({ sessionId, agentName });
+  // Phase 4: dispatch is now done via AgentDispatchClient (Twirp). We still
+  // stash sessionId in metadata as a fallback — the worker reads it as a
+  // fall-through if it can't find it on the dispatch's own metadata.
+  at.metadata = JSON.stringify({ sessionId });
   return at.toJwt();
+}
+
+/**
+ * Phase 4: explicit per-room agent dispatch via Twirp. Replaces the Phase 3
+ * JWT workaround that auto-joined every room with empty `agent_name`.
+ *
+ * Returns true on success, false on any failure. We never let dispatch
+ * errors block token mint — the worker can still be set to auto-join (empty
+ * `agent_name`) as a fallback during local dev.
+ */
+async function dispatchAgentToRoom(opts: {
+  agentName: string;
+  roomName: string;
+  sessionId: string;
+}): Promise<boolean> {
+  const client = dispatchClient();
+  if (!client) return false;
+  try {
+    await client.createDispatch(opts.roomName, opts.agentName, {
+      metadata: JSON.stringify({ sessionId: opts.sessionId }),
+    });
+    return true;
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[livekit] AgentDispatchClient.createDispatch failed for room=${opts.roomName} agent=${opts.agentName}:`,
+      e,
+    );
+    return false;
+  }
 }
 
 /**
@@ -166,7 +259,14 @@ export function registerLiveKitRoutes(fastify: FastifyInstance): void {
           apiSecret,
           identity,
           roomName,
+          sessionId,
+        });
+        // Phase 4: explicit dispatch. Best-effort — we don't fail the token
+        // mint if dispatch fails; the worker can still auto-join with empty
+        // agent_name if explicit dispatch is misconfigured locally.
+        const agentDispatched = await dispatchAgentToRoom({
           agentName,
+          roomName,
           sessionId,
         });
         return reply.send({
@@ -176,6 +276,7 @@ export function registerLiveKitRoutes(fastify: FastifyInstance): void {
           identity,
           sessionId,
           agentName,
+          agentDispatched,
         });
       } catch (e) {
         req.log.error({ err: e }, "mintToken failed");
@@ -214,16 +315,128 @@ export function registerLiveKitRoutes(fastify: FastifyInstance): void {
     },
   );
 
-  fastify.post<{ Body: ToolCallBody }>(
+  fastify.post<{ Body: ToolCallBody; Reply: ToolCallResponse | { error: string } }>(
     "/api/avatar/tool-call",
     async (req, reply) => {
       const body = req.body ?? ({} as ToolCallBody);
-      if (!body.sessionId || !body.name) {
-        return reply.code(400).send({ error: "sessionId and name required" });
+      if (!body.name) {
+        return reply.code(400).send({ error: "name is required" });
       }
-      // Phase 3: log only. Phase 4 routes start_build to /api/session.
-      req.log.info({ tool: body.name, args: body.args }, "[phase3] tool-call");
-      return reply.code(204).send();
+      const args = body.args ?? {};
+      req.log.info({ tool: body.name, args, sessionId: body.sessionId }, "[phase4] tool-call");
+
+      // Without orchestrator hooks we can't actually start a build; degrade
+      // gracefully so the smoke path returns a 200 the agent can paraphrase.
+      if (!_hooks) {
+        req.log.warn("tool-call received but orchestrator hooks are not registered");
+        return reply.send({
+          ok: false,
+          sessionId: body.sessionId ?? "",
+          name: body.name,
+          status: "ignored",
+          reason: "hooks_unavailable",
+        });
+      }
+
+      try {
+        switch (body.name) {
+          case "start_build": {
+            const intent = typeof args.intent === "string" ? args.intent : "";
+            if (!intent.trim()) {
+              return reply.code(400).send({ error: "intent is required" });
+            }
+            const out = await _hooks.startBuild({
+              sessionId: body.sessionId,
+              intent,
+            });
+            return reply.send({
+              ok: true,
+              sessionId: out.sessionId,
+              name: body.name,
+              status: "started",
+            });
+          }
+          case "modify_build": {
+            const change = typeof args.change === "string" ? args.change : "";
+            if (!body.sessionId) {
+              return reply.code(400).send({
+                error: "sessionId required for modify_build (no active build)",
+              });
+            }
+            if (!change.trim()) {
+              return reply.code(400).send({ error: "change is required" });
+            }
+            const out = await _hooks.modifyBuild({
+              sessionId: body.sessionId,
+              change,
+            });
+            return reply.send({
+              ok: true,
+              sessionId: out.sessionId,
+              name: body.name,
+              status: "queued",
+            });
+          }
+          case "stop_build": {
+            const reason =
+              typeof args.reason === "string" ? args.reason : "user_cancel";
+            if (!body.sessionId) {
+              return reply.code(400).send({
+                error: "sessionId required for stop_build",
+              });
+            }
+            await _hooks.cancelBuild({ sessionId: body.sessionId, reason });
+            return reply.send({
+              ok: true,
+              sessionId: body.sessionId,
+              name: body.name,
+              status: "cancelled",
+            });
+          }
+          default: {
+            req.log.warn({ name: body.name }, "unknown tool name");
+            return reply.send({
+              ok: false,
+              sessionId: body.sessionId ?? "",
+              name: body.name,
+              status: "ignored",
+              reason: "unknown_tool",
+            });
+          }
+        }
+      } catch (e) {
+        req.log.error({ err: e, body }, "tool-call dispatch failed");
+        return reply.code(500).send({ error: (e as Error).message });
+      }
+    },
+  );
+
+  // Phase 4.5: narration channel. The orchestrator's Cursor event loop calls
+  // this whenever an `assistant_delta` fragment passes the rate-limit gate.
+  // The handler writes the narration text into Convex (`sessions.narrationText`).
+  // The LiveKit agent watches that field and triggers `session.say()` to make
+  // the avatar speak the line. Convex is the side channel — no separate WS.
+  fastify.post<{ Body: NarrateBody; Reply: { ok: boolean } | { error: string } }>(
+    "/api/avatar/narrate",
+    async (req, reply) => {
+      const body = req.body ?? ({} as NarrateBody);
+      if (!body.sessionId || !body.text || !body.text.trim()) {
+        return reply.code(400).send({ error: "sessionId and non-empty text required" });
+      }
+      const client = convex();
+      if (!client) {
+        req.log.warn("narrate received but CONVEX_URL not set; ignoring");
+        return reply.send({ ok: true });
+      }
+      try {
+        await client.mutation(api.sessions.updateNarration, {
+          sessionId: body.sessionId as SessionId,
+          narrationText: body.text.trim(),
+        });
+      } catch (e) {
+        req.log.warn({ err: e, body }, "updateNarration failed");
+      }
+      return reply.send({ ok: true });
     },
   );
 }

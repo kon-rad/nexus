@@ -17,6 +17,7 @@
     "convex": "^1.38.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.8.5",
+    "jszip": "^3.10.1",
     "livekit-server-sdk": "^2.10.2",
     "pino-pretty": "^13.1.3"
   },

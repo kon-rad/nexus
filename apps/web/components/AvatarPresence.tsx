@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { AvatarState } from "./StatusBadge";
 
 type AvatarPresenceProps = {
@@ -5,14 +6,21 @@ type AvatarPresenceProps = {
 };
 
 /**
- * Abstract orb placeholder for the Tavus avatar — state-driven glow.
- * Replaced with a live <video> track in Phase 3.
+ * Nexus headshot with a state-driven glow — landing page hero placeholder.
+ * Mirrors the composition of a real Tavus video feed.
  */
 export function AvatarPresence({ state = "speaking" }: AvatarPresenceProps) {
   return (
     <div className="presence-stage" data-state={state}>
       <div className="presence-glow" />
-      <div className="presence-orb" />
+      <Image
+        src="/nexus.png"
+        alt="Nexus"
+        fill
+        priority
+        sizes="(max-width: 900px) 100vw, 460px"
+        style={{ objectFit: "cover", zIndex: 0 }}
+      />
       <div className="presence-grain" />
       <div
         style={{

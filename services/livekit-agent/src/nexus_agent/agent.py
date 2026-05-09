@@ -1,4 +1,4 @@
-"""Nexus voice agent: Gemini Live + Tavus BYO + Convex-mirrored state.
+"""Nexus voice agent: Gemini Live + Tavus BYO + three Phase 4 tools.
 
 The agent is a thin wrapper around livekit.agents.AgentSession:
 
@@ -12,12 +12,18 @@ manually wire any audio pipes — `AvatarSession.start(session, room)` does it.
 The agent listens to AgentSession lifecycle events and forwards each transition
 to the orchestrator over HTTP, which mirrors them to Convex
 (`sessions.avatarState`). The browser's `useQuery` updates the StatusBadge.
+
+Phase 4 tools:
+  - start_build(intent)  → POST /api/session  (kicks Cursor + Daytona)
+  - modify_build(change) → POST /api/session  (resume same Cursor agent)
+  - web_search(query)    → Tavily, agent-side. Never hits the orchestrator.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from livekit.agents import (
@@ -31,7 +37,13 @@ from livekit.agents import (
 if TYPE_CHECKING:
     from livekit.agents import AgentStateChangedEvent
 
+from .narration_server import (
+    register_narration_session,
+    shutdown_narration_server,
+    unregister_narration_session,
+)
 from .orchestrator_client import OrchestratorClient
+from .tavily_client import TavilyClient
 
 logger = logging.getLogger(__name__)
 
@@ -50,18 +62,36 @@ except ImportError:  # pragma: no cover
     _tavus = None  # type: ignore[assignment]
 
 
-# ---- Configuration ---------------------------------------------------------
-SYSTEM_INSTRUCTIONS = (
-    "You are Nexus, a senior pair programmer on a video call with the user. "
-    "Listen to what they want to build. Phase 3: chat naturally and answer "
-    "design questions. DO NOT call any code-generation tools yet — they land "
-    "in Phase 4. Keep responses tight: one or two sentences before the user "
-    "speaks again. Speak with warm confidence, like a friend who happens to "
-    "be the best engineer you know."
+# ---- System prompt loading -------------------------------------------------
+# Source of truth: services/livekit-agent/prompts/system_prompt.txt
+# Documented in: docs/voice-system-prompt.md
+#
+# We load at import time so a malformed/missing prompt fails the worker
+# startup loudly rather than silently using a fallback in production.
+
+_PROMPT_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "prompts" / "system_prompt.txt"
 )
 
+
+def _load_system_prompt() -> str:
+    if not _PROMPT_PATH.exists():
+        raise RuntimeError(
+            f"System prompt missing at {_PROMPT_PATH}. "
+            "See docs/voice-system-prompt.md for the source of truth."
+        )
+    text = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+    if not text:
+        raise RuntimeError(f"System prompt at {_PROMPT_PATH} is empty.")
+    return text
+
+
+SYSTEM_INSTRUCTIONS = _load_system_prompt()
+
 # Default Gemini Live model + voice. Overridable via env for cost tuning.
-DEFAULT_MODEL = os.environ.get("GEMINI_REALTIME_MODEL", "gemini-2.5-flash-preview-native-audio-dialog")
+DEFAULT_MODEL = os.environ.get(
+    "GEMINI_REALTIME_MODEL", "gemini-2.5-flash-preview-native-audio-dialog"
+)
 DEFAULT_VOICE = os.environ.get("GEMINI_REALTIME_VOICE", "Puck")
 
 
@@ -71,24 +101,123 @@ DEFAULT_VOICE = os.environ.get("GEMINI_REALTIME_VOICE", "Puck")
 
 
 class NexusAgent(Agent):
-    """The voice persona. Phase 3 only chats. Phase 4 adds start_build()."""
+    """The voice persona. Three Phase 4 tools registered below."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        client: OrchestratorClient,
+        tavily: TavilyClient,
+        session_id: str | None,
+        on_session_resolved: Any = None,
+    ) -> None:
         super().__init__(instructions=SYSTEM_INSTRUCTIONS)
+        self._client = client
+        self._tavily = tavily
+        # The "active build session" — same as the voice session. The first
+        # start_build call lands on this row in Convex; modify_build reuses
+        # it.
+        self._session_id = session_id
+        # Callback invoked when start_build / modify_build resolve a (possibly
+        # new) sessionId. The entrypoint passes a closure that writes the id
+        # onto the local participant's attributes so the frontend picks it up
+        # via room.localParticipant attributes.
+        self._on_session_resolved = on_session_resolved
+
+    async def _publish_resolved_session(self, sid: str) -> None:
+        if not sid:
+            return
+        # Re-register narration in case the sessionId changed (start_build
+        # may produce a new row when the prior one was voice-only).
+        try:
+            register_narration_session(sid, self.session)  # type: ignore[arg-type]
+        except Exception as e:  # pragma: no cover
+            logger.debug("narration re-register raised: %s", e)
+        if self._on_session_resolved is not None:
+            try:
+                await self._on_session_resolved(sid)
+            except Exception as e:  # pragma: no cover
+                logger.warning("on_session_resolved raised: %s", e)
+
+    # -- Tools --------------------------------------------------------------
 
     @function_tool()
-    async def chat_status(self, context: RunContext, status: str) -> str:
-        """Acknowledge an internal status. Phase 3 placeholder.
+    async def start_build(self, context: RunContext, intent: str) -> str:  # noqa: ARG002
+        """Trigger a new application build.
+
+        Call when the user describes something to build. The orchestrator
+        spins a Daytona sandbox and a Cursor agent; code streams into the
+        right panel. While it runs (10–60s), keep talking to the user.
 
         Args:
-            status: Free-text label, e.g. "ready" / "thinking" / "stuck".
-
-        Phase 4 will replace this with start_build(intent: str). The function
-        signature is preserved so we can swap implementations without churning
-        the system prompt.
+            intent: The user's request as a single sentence — what they
+                want plus enough technical specifics for the coding agent
+                to act on.
         """
-        logger.info("chat_status: %s", status)
-        return f"acknowledged: {status}"
+        logger.info("tool: start_build(intent=%r)", intent)
+        result = await self._client.tool_call(
+            session_id=self._session_id,
+            name="start_build",
+            args={"intent": intent},
+        )
+        if result is None:
+            return "could not reach the build system — try again in a moment"
+        sid = result.get("sessionId")
+        if isinstance(sid, str) and sid:
+            self._session_id = sid
+            await self._publish_resolved_session(sid)
+        # Return a short, identifier-free string so Gemini doesn't have a
+        # chance to read a session id aloud. The avatar's narration during
+        # codegen is driven by the system prompt + the orchestrator's
+        # narration channel (Phase 4.5).
+        return "build started"
+
+    @function_tool()
+    async def modify_build(self, context: RunContext, change: str) -> str:  # noqa: ARG002
+        """Apply a follow-up change to the active build.
+
+        Same session, same Daytona sandbox, same Cursor agent. The agent
+        receives `change` as its next turn and edits in place.
+
+        Args:
+            change: The user's modification request — what to change,
+                in their words plus enough specifics for the coding agent.
+        """
+        logger.info("tool: modify_build(change=%r)", change)
+        if not self._session_id:
+            return "no build to modify yet — call start_build first"
+        result = await self._client.tool_call(
+            session_id=self._session_id,
+            name="modify_build",
+            args={"change": change},
+        )
+        if result is None:
+            return "could not reach the build system — try again in a moment"
+        sid = result.get("sessionId") or self._session_id
+        if isinstance(sid, str) and sid != self._session_id:
+            self._session_id = sid
+            await self._publish_resolved_session(sid)
+        return "changes queued"
+
+    @function_tool()
+    async def web_search(self, context: RunContext, query: str) -> str:  # noqa: ARG002
+        """Search the web for current information.
+
+        Use when the answer depends on current state of the world: latest
+        versions, today's recommended frameworks, current pricing, news.
+        Returns up to ~1500 chars of plain text — Gemini will summarize
+        for the user.
+
+        Args:
+            query: The search query.
+        """
+        logger.info("tool: web_search(query=%r)", query)
+        if not self._tavily.is_configured:
+            return (
+                "web search is not set up on this worker — TAVILY_API_KEY is "
+                "missing."
+            )
+        return await self._tavily.search(query)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +243,7 @@ def build_agent_session() -> AgentSession:
 
         avatar = build_avatar()
         await avatar.start(session, room=ctx.room)
-        await session.start(agent=NexusAgent(), room=ctx.room)
+        await session.start(agent=NexusAgent(...), room=ctx.room)
     """
     google = _require_plugin("google", _google)
     return AgentSession(
@@ -227,7 +356,7 @@ async def entrypoint(ctx: JobContext) -> None:
     Reads sessionId + livekitRoom from the first remote participant's
     metadata (the orchestrator stamps it into the JWT before the browser
     joins the room). Bootstraps Gemini + Tavus, wires state forwarding,
-    and starts the session.
+    registers Phase 4 tools, and starts the session.
     """
     import json
 
@@ -263,18 +392,65 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     client = OrchestratorClient()
+    tavily = TavilyClient()
+    if not tavily.is_configured:
+        logger.warning(
+            "TAVILY_API_KEY is not set — web_search tool will return a "
+            "graceful 'not configured' message instead of searching."
+        )
+
+    # Phase 4.3: callback used by NexusAgent.start_build to write the resolved
+    # sessionId onto the agent's local participant attributes. The frontend
+    # subscribes to participant attribute changes via livekit-client and uses
+    # the value as the Convex selector for the right-panel queries.
+    async def _publish_session_id(sid: str) -> None:
+        if not getattr(ctx, "room", None) or not ctx.room.local_participant:
+            return
+        try:
+            await ctx.room.local_participant.set_attributes({"sessionId": sid})
+            logger.info("published sessionId=%s on local_participant attrs", sid)
+        except Exception as e:  # pragma: no cover — older SDK paths
+            logger.warning(
+                "set_attributes failed (%s) — falling back to set_metadata", e
+            )
+            try:
+                await ctx.room.local_participant.set_metadata(
+                    json.dumps({"sessionId": sid})
+                )
+            except Exception as e2:
+                logger.warning("set_metadata fallback also failed: %s", e2)
+
     try:
         session = build_agent_session()
         attach_state_forwarder(
             session, client=client, session_id=session_id, livekit_room=room_name
         )
 
-        # Avatar must start before session.start() so its participant is in the
-        # room and ready to subscribe to the agent's audio output.
-        avatar = build_avatar()
-        await avatar.start(session, room=ctx.room)
+        # Phase 4.8 — Tavus offline → audio-only fallback. Don't fatal-out
+        # the whole worker; log and proceed without the avatar.
+        try:
+            avatar = build_avatar()
+            await avatar.start(session, room=ctx.room)
+        except Exception as e:
+            logger.warning(
+                "Tavus avatar failed to start (%s) — falling back to audio-only", e
+            )
 
-        await session.start(agent=NexusAgent(), room=ctx.room)
+        agent = NexusAgent(
+            client=client,
+            tavily=tavily,
+            session_id=session_id,
+            on_session_resolved=_publish_session_id,
+        )
+        await session.start(agent=agent, room=ctx.room)
+
+        # Phase 4.5: register the live AgentSession with the narration server
+        # so the orchestrator's HTTP narration POSTs can call session.say().
+        # If we didn't yet have a session_id (voice-only boot), register on
+        # the first start_build via the on_session_resolved callback above.
+        if session_id:
+            register_narration_session(session_id, session)
+            await _publish_session_id(session_id)
 
         # Eagerly mark "listening" so the UI doesn't dwell on "idle" while the
         # realtime LLM is bootstrapping.
@@ -292,12 +468,17 @@ async def entrypoint(ctx: JobContext) -> None:
             )
         )
 
-        # Block until the participant leaves. The AgentSession keeps running
-        # in background tasks; we just need to keep the entrypoint alive so
-        # the agent's connection isn't torn down by the worker.
-        # JobContext exposes a shutdown coroutine that resolves when the room
-        # closes or the worker drains.
-        ctx.add_shutdown_callback(client.aclose)
+        async def _on_shutdown() -> None:
+            if session_id:
+                unregister_narration_session(session_id)
+            await client.aclose()
+            await tavily.aclose()
+            await shutdown_narration_server()
+
+        ctx.add_shutdown_callback(_on_shutdown)
     except Exception:
+        if session_id:
+            unregister_narration_session(session_id)
         await client.aclose()
+        await tavily.aclose()
         raise
