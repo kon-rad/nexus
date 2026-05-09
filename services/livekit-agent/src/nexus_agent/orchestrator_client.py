@@ -150,3 +150,47 @@ class OrchestratorClient:
         except httpx.HTTPError as e:
             logger.warning("tool_call(%s) failed: %s", name, e)
             return None
+
+    async def list_fal_models(
+        self,
+        *,
+        category: str | None = None,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """GET /api/fal/models — returns slim model records for tool selection."""
+        params: dict[str, str] = {}
+        if category:
+            params["category"] = category
+        if query:
+            params["q"] = query
+        url = f"{self._base_url}/api/fal/models"
+        try:
+            r = await self._client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            return list(data.get("models", []))
+        except httpx.HTTPError as e:
+            logger.warning("list_fal_models failed: %s", e)
+            return []
+
+    async def run_fal_model(
+        self,
+        *,
+        session_id: str,
+        endpoint_id: str,
+        input: dict[str, Any],
+    ) -> str | None:
+        """POST /api/fal/run — kicks off a fal job. Returns the Convex jobId."""
+        url = f"{self._base_url}/api/fal/run"
+        payload = {
+            "sessionId": session_id,
+            "endpointId": endpoint_id,
+            "input": input,
+        }
+        try:
+            r = await self._client.post(url, json=payload)
+            r.raise_for_status()
+            return r.json().get("jobId")
+        except httpx.HTTPError as e:
+            logger.warning("run_fal_model(%s) failed: %s", endpoint_id, e)
+            return None
