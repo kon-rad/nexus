@@ -68,6 +68,9 @@ env/
 
 # Convex
 .convex/
+# Convex CLI auto-generates a stub here when Next imports `convex/react`.
+# The real generated code lives at the repo-root `convex/_generated/`.
+apps/web/convex/
 
 # Turbo
 .turbo
