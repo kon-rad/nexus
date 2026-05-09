@@ -122,3 +122,38 @@ export async function updateSandbox(
     ...args,
   });
 }
+
+export type FalJobId = Id<"falJobs">;
+
+export async function enqueueFalJob(args: {
+  sessionId: SessionId;
+  endpointId: string;
+  displayName?: string;
+  category?: string;
+  input: unknown;
+}): Promise<FalJobId> {
+  const id = await getClient().mutation(api.falJobs.enqueue, args);
+  return id as FalJobId;
+}
+
+export async function updateFalJob(
+  jobId: FalJobId,
+  patch: { status: string; requestId?: string; queuePosition?: number },
+): Promise<void> {
+  await getClient().mutation(api.falJobs.updateStatus, { jobId, ...patch });
+}
+
+export async function setFalOutput(
+  jobId: FalJobId,
+  output: unknown,
+  outputKind: string,
+): Promise<void> {
+  await getClient().mutation(api.falJobs.setOutput, { jobId, output, outputKind });
+}
+
+export async function setFalError(
+  jobId: FalJobId,
+  errorMessage: string,
+): Promise<void> {
+  await getClient().mutation(api.falJobs.setError, { jobId, errorMessage });
+}
