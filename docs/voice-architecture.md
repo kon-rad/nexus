@@ -97,6 +97,28 @@ async def start_build(self, context: RunContext, intent: str) -> str:
 
 Local dev runs `livekit/livekit-server --dev` in Docker with UDP 50000–60000 mapped. If Docker is unavailable, fall back to LiveKit Cloud (`wss://<project>.livekit.cloud`). Either way, the env vars are the same — `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — only the URL changes.
 
+## Interruption (Q5 — Phase 3 scope)
+
+LiveKit Agents 1.5 + Gemini Live handle the wiring for free; we just have to
+opt into it. The chain is:
+
+1. Browser publishes mic via WebRTC. LiveKit's built-in VAD detects voice activity.
+2. `AgentSession` emits `user_state_changed` with `new_state="speaking"`. We catch
+   this in `attach_state_forwarder()` and:
+   - Optimistically flip the Convex `avatarState` to `"listening"` (so the UI
+     drops out of the speaking glow before any audio confirms it).
+   - Call `session.interrupt()` defensively — this propagates a cancel to the
+     realtime LLM, which stops emitting audio.
+3. Gemini Live's native interruption flushes its TTS buffer. The Tavus
+   AvatarSession sees no more audio frames upstream and stops emitting video
+   frames after its current playout finishes (target: ≤300 ms — see `latency-budget.md`).
+4. Once the user stops speaking and the realtime model picks back up,
+   `agent_state_changed` cycles through `listening → thinking → speaking`
+   normally.
+
+The Phase 4 codegen variant (interrupt mid-codegen) is out of scope for Phase 3.
+Phase 3 only verifies that voice-on-voice interruption holds.
+
 ## Things this doc deliberately doesn't cover
 
 - **Cursor / Daytona orchestration.** Phase 2's territory.
