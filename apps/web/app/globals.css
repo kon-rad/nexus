@@ -287,6 +287,10 @@
   flex-shrink: 0;
   position: relative;
 }
+.status-dot.idle {
+  background: var(--text-tertiary);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
+}
 .status-dot.listening {
   background: #00ff85;
   box-shadow:
@@ -430,6 +434,13 @@
   }
 }
 
+.presence-stage[data-state="idle"] {
+  --glow-color: rgba(255, 255, 255, 0.18);
+  --orb-mid: #2a2a2e;
+  --orb-edge: #18181b;
+  --orb-glow: rgba(255, 255, 255, 0.15);
+  --glow-opacity: 0.18;
+}
 .presence-stage[data-state="listening"] {
   --glow-color: #00ff85;
   --orb-mid: #1c8a66;
@@ -445,11 +456,14 @@
   --glow-opacity: 0.65;
 }
 .presence-stage[data-state="speaking"] {
-  --glow-color: var(--accent-cyan);
+  /* design-prompt §3 says "white" for speaking; keep the cyan undertone for the
+     orb fallback but lift the radial glow toward white so the avatar's face
+     pops when it's talking. */
+  --glow-color: rgba(255, 255, 255, 0.7);
   --orb-mid: #1a8db3;
   --orb-edge: #0a2a3f;
-  --orb-glow: rgba(0, 229, 255, 0.55);
-  --glow-opacity: 0.6;
+  --orb-glow: rgba(255, 255, 255, 0.55);
+  --glow-opacity: 0.55;
 }
 
 /* =========================================================

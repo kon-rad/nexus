@@ -10,6 +10,11 @@ type AvatarControlsProps = {
   onToggleMute: () => void;
   onEnd: () => void;
   state: AvatarState;
+  /**
+   * Phase 3: live mic track (from `Room.localParticipant`). When provided,
+   * the waveform reads true levels via Web Audio. When null, mock animation.
+   */
+  micTrack?: MediaStreamTrack | null;
 };
 
 export function AvatarControls({
@@ -17,6 +22,7 @@ export function AvatarControls({
   onToggleMute,
   onEnd,
   state,
+  micTrack = null,
 }: AvatarControlsProps) {
   return (
     <GlassPill
@@ -52,7 +58,10 @@ export function AvatarControls({
           color: "var(--accent-cyan)",
         }}
       >
-        <Waveform active={!muted && state !== "thinking"} />
+        <Waveform
+          active={!muted && state !== "thinking"}
+          source={muted ? null : micTrack}
+        />
       </div>
       <button
         type="button"

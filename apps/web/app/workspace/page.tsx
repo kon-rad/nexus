@@ -8,8 +8,10 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { AvatarControls } from "@/components/AvatarControls";
-import { AvatarPresence } from "@/components/AvatarPresence";
 import {
   IconBulb,
   IconCog,
@@ -18,13 +20,19 @@ import {
   IconPlay,
 } from "@/components/icons";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
-import { StatusBadge, type AvatarState } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { TabBar, type TabItem } from "@/components/TabBar";
+import { TavusAvatar } from "@/components/TavusAvatar";
+import { useLiveKitRoom, type AvatarState } from "@/lib/livekit";
 import { CodeInspection } from "./CodeInspection";
+import { DevPromptBar } from "./DevPromptBar";
 import { Insights } from "./Insights";
 import { LivePreview } from "./LivePreview";
 
 type TabKey = "preview" | "code" | "insights";
+
+const DEV_PROMPT_BAR_ENABLED =
+  process.env.NEXT_PUBLIC_DEV_PROMPT_BAR === "1";
 
 const TABS: ReadonlyArray<TabItem<TabKey>> = [
   { key: "preview", label: "Live Preview", icon: <IconPlay size={11} /> },
@@ -38,26 +46,35 @@ const DEFAULT_LEFT_PCT = 30;
 
 export default function WorkspacePage() {
   const [activeTab, setActiveTab] = useState<TabKey>("preview");
-  const [muted, setMuted] = useState(false);
-  const [aiState, setAiState] = useState<AvatarState>("speaking");
   const [leftWidth, setLeftWidth] = useState<number>(DEFAULT_LEFT_PCT);
+  // Phase 2: tracks the active Convex session for the right-panel queries.
+  // Phase 4 swaps this for `room.metadata.sessionId` from LiveKit.
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Cycle avatar states for life — placeholder until Phase 3.
+  // Phase 3: read live avatar state from Convex when a session row exists.
+  // The LiveKit agent writes here via the orchestrator's /api/avatar/state.
+  const liveSession = useQuery(
+    api.sessions.get,
+    sessionId ? { sessionId: sessionId as Id<"sessions"> } : "skip",
+  );
+  const convexAvatarState =
+    (liveSession?.avatarState as AvatarState | undefined) ?? undefined;
+
+  // Phase 3: connect to LiveKit on mount. The hook lazily resolves a sessionId
+  // from the orchestrator if none is supplied. We mirror it back into our
+  // local sessionId state so the right-panel queries pick the same row.
+  const room = useLiveKitRoom({
+    enabled: true,
+    sessionId: sessionId ?? undefined,
+    externalAvatarState: convexAvatarState,
+  });
+  const aiState: AvatarState = room.avatarState;
+
   useEffect(() => {
-    const cycle: ReadonlyArray<AvatarState> = [
-      "speaking",
-      "speaking",
-      "thinking",
-      "listening",
-    ];
-    let i = 0;
-    const id = window.setInterval(() => {
-      i = (i + 1) % cycle.length;
-      const next = cycle[i];
-      if (next) setAiState(next);
-    }, 4200);
-    return () => window.clearInterval(id);
-  }, []);
+    if (room.sessionId && !sessionId) {
+      setSessionId(room.sessionId);
+    }
+  }, [room.sessionId, sessionId]);
 
   // Resize handle.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -108,8 +125,12 @@ export default function WorkspacePage() {
           flexShrink: 0,
         }}
       >
-        <AvatarPresence state={aiState} />
-        <div style={{ position: "absolute", top: 16, left: 16 }}>
+        <TavusAvatar
+          videoTrack={room.avatarVideoTrack}
+          state={aiState}
+          connecting={!room.avatarVideoTrack && !room.error}
+        />
+        <div style={{ position: "absolute", top: 16, left: 16, zIndex: 3 }}>
           <StatusBadge state={aiState} />
         </div>
         <div
@@ -117,6 +138,7 @@ export default function WorkspacePage() {
             position: "absolute",
             top: 14,
             right: 16,
+            zIndex: 3,
             display: "flex",
             flexDirection: "column",
             alignItems: "flex-end",
@@ -132,31 +154,12 @@ export default function WorkspacePage() {
               letterSpacing: "0.04em",
             }}
           >
-            phoenix-4 · 32ms
+            {room.avatarVideoTrack ? "phoenix-4 · live" : "phoenix-4 · idle"}
           </div>
         </div>
 
-        {aiState === "speaking" ? (
-          <div
-            style={{
-              position: "absolute",
-              left: 24,
-              right: 24,
-              bottom: 100,
-              textAlign: "center",
-              color: "rgba(255, 255, 255, 0.85)",
-              fontSize: 14,
-              lineHeight: 1.5,
-              fontWeight: 400,
-              textShadow: "0 2px 12px rgba(0, 0, 0, 0.6)",
-              maxWidth: 460,
-              margin: "0 auto",
-            }}
-          >
-            "I'll wire up the optimistic insert next so adds feel instant — give
-            me ten seconds."
-          </div>
-        ) : null}
+        {/* The "thinking" hint surfaces only when the avatar is mid-pause —
+            the live face takes care of "speaking" feedback. */}
         {aiState === "thinking" ? (
           <div
             style={{
@@ -164,6 +167,7 @@ export default function WorkspacePage() {
               left: "50%",
               bottom: 100,
               transform: "translateX(-50%)",
+              zIndex: 3,
               color: "var(--accent-purple)",
               fontFamily: "var(--font-jetbrains-mono), monospace",
               fontSize: 12,
@@ -171,10 +175,34 @@ export default function WorkspacePage() {
               display: "inline-flex",
               gap: 8,
               alignItems: "center",
+              textShadow: "0 0 14px rgba(176, 38, 255, 0.6)",
             }}
           >
             <span>thinking</span>
             <span style={{ animation: "blink 1s steps(1) infinite" }}>...</span>
+          </div>
+        ) : null}
+        {room.error ? (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: 100,
+              transform: "translateX(-50%)",
+              zIndex: 3,
+              maxWidth: 360,
+              padding: "8px 14px",
+              borderRadius: 999,
+              background: "rgba(255, 68, 68, 0.12)",
+              border: "1px solid rgba(255, 68, 68, 0.3)",
+              color: "var(--danger-soft)",
+              fontFamily: "var(--font-jetbrains-mono), monospace",
+              fontSize: 11,
+              letterSpacing: "0.05em",
+              textAlign: "center",
+            }}
+          >
+            voice unavailable — start the orchestrator + livekit-agent
           </div>
         ) : null}
 
@@ -184,15 +212,15 @@ export default function WorkspacePage() {
             bottom: 28,
             left: "50%",
             transform: "translateX(-50%)",
+            zIndex: 3,
           }}
         >
           <AvatarControls
-            muted={muted}
-            onToggleMute={() => setMuted((m) => !m)}
-            onEnd={() => {
-              /* Phase 3: tear down LiveKit room. */
-            }}
+            muted={!room.micEnabled}
+            onToggleMute={() => void room.toggleMic()}
+            onEnd={() => void room.endCall()}
             state={aiState}
+            micTrack={room.localMicTrack}
           />
         </div>
       </div>
@@ -321,11 +349,16 @@ export default function WorkspacePage() {
           </div>
         </div>
 
+        {/* Phase-2-only dev prompt bar — gated by NEXT_PUBLIC_DEV_PROMPT_BAR. */}
+        {DEV_PROMPT_BAR_ENABLED ? (
+          <DevPromptBar sessionId={sessionId} onSession={setSessionId} />
+        ) : null}
+
         {/* Tab content */}
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-          {activeTab === "preview" ? <LivePreview /> : null}
-          {activeTab === "code" ? <CodeInspection /> : null}
-          {activeTab === "insights" ? <Insights /> : null}
+          {activeTab === "preview" ? <LivePreview sessionId={sessionId} /> : null}
+          {activeTab === "code" ? <CodeInspection sessionId={sessionId} /> : null}
+          {activeTab === "insights" ? <Insights sessionId={sessionId} /> : null}
         </div>
       </div>
     </div>

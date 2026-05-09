@@ -1,8 +1,9 @@
 import { GlassPill } from "./GlassPill";
 
-export type AvatarState = "listening" | "thinking" | "speaking";
+export type AvatarState = "idle" | "listening" | "thinking" | "speaking";
 
 const LABELS: Record<AvatarState, string> = {
+  idle: "Connecting",
   listening: "Listening",
   thinking: "Thinking",
   speaking: "Speaking",
