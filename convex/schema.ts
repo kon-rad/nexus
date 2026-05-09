@@ -60,6 +60,42 @@ export default defineSchema({
     ts: v.number(),
   }).index("by_session", ["sessionId", "ts"]),
 
+  /**
+   * Per-call record of a fal.ai model invocation. The orchestrator inserts a
+   * row when the agent calls run_fal_model, then patches it as the queue
+   * progresses (queued → in_progress → completed/error). The Generate tab
+   * subscribes to this table to render typed previews.
+   */
+  falJobs: defineTable({
+    sessionId: v.id("sessions"),
+    /** fal queue request id, e.g. "764cabcf-7f12-…". Set after submit lands. */
+    requestId: v.optional(v.string()),
+    /** fal endpoint id, e.g. "fal-ai/flux/dev" or "fal-ai/minimax/video-01". */
+    endpointId: v.string(),
+    /** Human-readable model name from /v1/models metadata.display_name. */
+    displayName: v.optional(v.string()),
+    /** "text-to-image" | "image-to-video" | "text-to-audio" | "text-to-3d" | etc. */
+    category: v.optional(v.string()),
+    /** What we sent to fal — full input object, including prompt + params. */
+    input: v.any(),
+    /** "queued" | "in_progress" | "completed" | "error" | "cancelled". */
+    status: v.string(),
+    /** Number of requests ahead of this one. Set while status === "queued". */
+    queuePosition: v.optional(v.number()),
+    /** Final output JSON from fal — model-specific shape. */
+    output: v.optional(v.any()),
+    /**
+     * Detected output kind so the renderer can dispatch without re-parsing:
+     * "image" | "video" | "audio" | "text" | "3d" | "json".
+     */
+    outputKind: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_session", ["sessionId", "createdAt"])
+    .index("by_request", ["requestId"]),
+
   /** Daytona sandbox state for the Live Preview iframe URL bar. */
   sandbox: defineTable({
     sessionId: v.id("sessions"),
