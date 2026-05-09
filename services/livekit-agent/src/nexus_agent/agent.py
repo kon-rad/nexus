@@ -224,22 +224,39 @@ def attach_state_forwarder(
 async def entrypoint(ctx: JobContext) -> None:
     """JobContext entrypoint registered by the worker.
 
-    Reads sessionId + livekitRoom from the job's metadata if present (the
-    orchestrator passes them when minting a JWT). Bootstraps Gemini + Tavus,
-    wires state forwarding, and starts the session.
+    Reads sessionId + livekitRoom from the first remote participant's
+    metadata (the orchestrator stamps it into the JWT before the browser
+    joins the room). Bootstraps Gemini + Tavus, wires state forwarding,
+    and starts the session.
     """
-    metadata: dict[str, Any] = {}
+    import json
+
+    room_name: str | None = ctx.room.name if getattr(ctx, "room", None) else None
+    session_id: str | None = None
+
+    # First check the job's metadata in case we end up using RoomAgentDispatch
+    # again (older livekit servers will tolerate it). Then fall back to the
+    # browser participant's metadata.
     raw_meta = getattr(ctx.job, "metadata", "") if hasattr(ctx, "job") else ""
     if raw_meta:
-        import json
-
         try:
-            metadata = json.loads(raw_meta)
+            session_id = json.loads(raw_meta).get("sessionId")
         except json.JSONDecodeError:
             logger.warning("Job metadata was not JSON: %r", raw_meta)
 
-    session_id: str | None = metadata.get("sessionId")
-    room_name: str | None = ctx.room.name if getattr(ctx, "room", None) else None
+    if not session_id:
+        # Wait briefly for the browser to join, then read its metadata.
+        try:
+            participant = await ctx.wait_for_participant()
+            if participant.metadata:
+                try:
+                    session_id = json.loads(participant.metadata).get("sessionId")
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Participant metadata was not JSON: %r", participant.metadata
+                    )
+        except Exception as e:
+            logger.warning("wait_for_participant failed: %s", e)
 
     logger.info(
         "Nexus agent entrypoint — room=%s sessionId=%s", room_name, session_id

@@ -22,7 +22,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { AccessToken, RoomAgentDispatch, RoomConfiguration } from "livekit-server-sdk";
+import { AccessToken } from "livekit-server-sdk";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api.js";
 import type { Id } from "../../../convex/_generated/dataModel.js";
@@ -102,15 +102,12 @@ async function mintToken(opts: {
     canSubscribe: true,
     canPublishData: true,
   });
-  at.roomConfig = new RoomConfiguration({
-    agents: [
-      new RoomAgentDispatch({
-        agentName,
-        // Pass sessionId to the agent worker so it can mirror state to Convex.
-        metadata: JSON.stringify({ sessionId }),
-      }),
-    ],
-  });
+  // Stash sessionId in participant metadata. The LiveKit agent reads it from
+  // the room's first participant. Avoids RoomAgentDispatch's "deployment"
+  // field, which livekit-server v1.11 rejects when seen in JWT JSON. Still
+  // dispatches the agent automatically because the worker matches on
+  // `agent_name` and our worker is registered with that name.
+  at.metadata = JSON.stringify({ sessionId, agentName });
   return at.toJwt();
 }
 

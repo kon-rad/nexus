@@ -56,7 +56,12 @@ def main() -> None:
     _bootstrap_env()
     _bootstrap_logging()
 
-    agent_name = os.environ.get("LIVEKIT_AGENT_NAME", "nexus-voice-agent")
+    # Phase 3 dev: leave agent_name unset by default so the worker auto-joins
+    # every room. This avoids the livekit-server v1.11.x JWT JSON-parse
+    # incompatibility with `RoomAgentDispatch.deployment` from
+    # livekit-server-sdk 2.15.x. Set LIVEKIT_AGENT_NAME explicitly to opt
+    # into per-session explicit dispatch (Phase 4 territory).
+    agent_name = os.environ.get("LIVEKIT_AGENT_NAME", "")
 
     cli.run_app(
         WorkerOptions(
